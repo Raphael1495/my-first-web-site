@@ -1,0 +1,5 @@
+__pycache__/
+*.pyc
+.env
+.state.json
+backtest_equity_curve.csv
