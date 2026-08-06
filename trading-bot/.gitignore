@@ -3,3 +3,5 @@ __pycache__/
 .env
 .state.json
 backtest_equity_curve.csv
+webapp/app.db
+webapp/krx_symbols_cache.json

@@ -1,0 +1,227 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<title>주식 자동매매 대시보드</title>
+<script src="https://unpkg.com/lightweight-charts/dist/lightweight-charts.standalone.production.js"></script>
+<style>
+  * { box-sizing: border-box; }
+  body { font-family: -apple-system, "Segoe UI", sans-serif; margin: 0; background: #0f1115; color: #e6e6e6; }
+  header { padding: 16px 24px; border-bottom: 1px solid #262a33; }
+  header h1 { font-size: 18px; margin: 0 0 12px; }
+  .search-box { position: relative; max-width: 420px; }
+  .search-box input { width: 100%; padding: 8px 12px; border-radius: 6px; border: 1px solid #333; background: #1a1d24; color: #e6e6e6; font-size: 14px; }
+  .search-results { position: absolute; top: 100%; left: 0; right: 0; background: #1a1d24; border: 1px solid #333; border-radius: 6px; margin-top: 4px; max-height: 280px; overflow-y: auto; z-index: 10; }
+  .search-results div { padding: 8px 12px; cursor: pointer; font-size: 13px; }
+  .search-results div:hover { background: #262a33; }
+  main { padding: 20px 24px; }
+  #chart-title { font-size: 15px; margin-bottom: 8px; color: #aab; }
+  #chart { border: 1px solid #262a33; border-radius: 8px; overflow: hidden; }
+  .tabs { display: flex; gap: 4px; margin: 24px 0 12px; border-bottom: 1px solid #262a33; }
+  .tab { padding: 8px 16px; cursor: pointer; font-size: 14px; color: #999; border-bottom: 2px solid transparent; }
+  .tab.active { color: #e6e6e6; border-color: #4f8cff; }
+  .panel { display: none; }
+  .panel.active { display: block; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid #1f232b; }
+  th { color: #888; font-weight: 500; }
+  .buy { color: #ff5b5b; } .sell { color: #4f8cff; }
+  button { background: #262a33; color: #e6e6e6; border: 1px solid #333; border-radius: 6px; padding: 6px 12px; cursor: pointer; font-size: 12px; }
+  button:hover { background: #333844; }
+  .add-form { display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; }
+  .add-form input { padding: 6px 10px; border-radius: 6px; border: 1px solid #333; background: #1a1d24; color: #e6e6e6; font-size: 13px; }
+  .muted { color: #777; font-size: 13px; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>주식 자동매매 대시보드</h1>
+  <div class="search-box">
+    <input id="search-input" placeholder="종목명 또는 코드 검색 (예: 삼성전자, 005930)" autocomplete="off" />
+    <div id="search-results" class="search-results" style="display:none;"></div>
+  </div>
+</header>
+
+<main>
+  <div style="display:flex; align-items:center; justify-content:space-between;">
+    <div id="chart-title">종목을 검색해서 선택하세요</div>
+    <button onclick="addCurrentToWatchlist()">관심종목에 추가</button>
+  </div>
+  <div id="chart"></div>
+
+  <div class="tabs">
+    <div class="tab active" data-panel="watchlist">관심종목</div>
+    <div class="tab" data-panel="holdings">보유종목</div>
+    <div class="tab" data-panel="journal">매매일지</div>
+  </div>
+
+  <div id="panel-watchlist" class="panel active">
+    <table>
+      <thead><tr><th>코드</th><th>이름</th><th>추가일</th><th></th></tr></thead>
+      <tbody id="watchlist-body"></tbody>
+    </table>
+  </div>
+
+  <div id="panel-holdings" class="panel">
+    <table>
+      <thead><tr><th>코드</th><th>이름</th><th>수량</th><th>평단가</th></tr></thead>
+      <tbody id="holdings-body"></tbody>
+    </table>
+    <p class="muted">매매일지에 기록된 매수/매도 내역으로 자동 계산됩니다.</p>
+  </div>
+
+  <div id="panel-journal" class="panel">
+    <div class="add-form">
+      <input id="j-code" placeholder="코드" style="width:80px" />
+      <input id="j-name" placeholder="이름" style="width:100px" />
+      <select id="j-side"><option value="buy">매수</option><option value="sell">매도</option></select>
+      <input id="j-shares" placeholder="수량" type="number" style="width:80px" />
+      <input id="j-price" placeholder="가격" type="number" style="width:100px" />
+      <input id="j-note" placeholder="메모 (선택)" style="width:160px" />
+      <button onclick="addTrade()">기록 추가</button>
+    </div>
+    <table>
+      <thead><tr><th>일시</th><th>코드</th><th>이름</th><th>구분</th><th>수량</th><th>가격</th><th>메모</th></tr></thead>
+      <tbody id="journal-body"></tbody>
+    </table>
+  </div>
+</main>
+
+<script>
+let currentSymbol = null;
+let chart, series;
+
+function initChart() {
+  chart = LightweightCharts.createChart(document.getElementById('chart'), {
+    width: document.getElementById('chart').clientWidth,
+    height: 420,
+    layout: { background: { color: '#0f1115' }, textColor: '#ccc' },
+    grid: { vertLines: { color: '#1a1d24' }, horzLines: { color: '#1a1d24' } },
+    timeScale: { borderColor: '#333' },
+  });
+  series = chart.addCandlestickSeries({
+    upColor: '#ff5b5b', downColor: '#4f8cff', borderVisible: false,
+    wickUpColor: '#ff5b5b', wickDownColor: '#4f8cff',
+  });
+  window.addEventListener('resize', () => chart.applyOptions({ width: document.getElementById('chart').clientWidth }));
+}
+
+async function loadChart(code, name) {
+  currentSymbol = { code, name };
+  document.getElementById('chart-title').textContent = `${name} (${code})`;
+  const res = await fetch(`/api/chart/${code}?period=1y`);
+  if (!res.ok) { alert('차트 데이터를 불러오지 못했습니다.'); return; }
+  const data = await res.json();
+  series.setData(data);
+  chart.timeScale().fitContent();
+}
+
+const searchInput = document.getElementById('search-input');
+const searchResults = document.getElementById('search-results');
+let searchTimer;
+searchInput.addEventListener('input', () => {
+  clearTimeout(searchTimer);
+  const q = searchInput.value.trim();
+  if (!q) { searchResults.style.display = 'none'; return; }
+  searchTimer = setTimeout(async () => {
+    const res = await fetch(`/api/search?q=${encodeURIComponent(q)}`);
+    const items = await res.json();
+    searchResults.innerHTML = items.map(i =>
+      `<div onclick="selectSymbol('${i.code}', '${i.name}')">${i.name} (${i.code}) · ${i.market}</div>`
+    ).join('') || '<div class="muted">검색 결과 없음</div>';
+    searchResults.style.display = 'block';
+  }, 250);
+});
+document.addEventListener('click', (e) => {
+  if (!e.target.closest('.search-box')) searchResults.style.display = 'none';
+});
+
+function selectSymbol(code, name) {
+  searchInput.value = `${name} (${code})`;
+  searchResults.style.display = 'none';
+  loadChart(code, name);
+}
+
+document.querySelectorAll('.tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+    tab.classList.add('active');
+    document.getElementById('panel-' + tab.dataset.panel).classList.add('active');
+    refreshAll();
+  });
+});
+
+async function refreshWatchlist() {
+  const res = await fetch('/api/watchlist');
+  const items = await res.json();
+  document.getElementById('watchlist-body').innerHTML = items.map(i => `
+    <tr>
+      <td>${i.code}</td><td>${i.name}</td><td>${i.added_at.slice(0,10)}</td>
+      <td><button onclick="removeWatch('${i.code}')">삭제</button></td>
+    </tr>`).join('') || '<tr><td colspan="4" class="muted">관심종목이 없습니다. 차트에서 종목 검색 후 추가하세요.</td></tr>';
+}
+
+async function removeWatch(code) {
+  await fetch(`/api/watchlist/${code}`, { method: 'DELETE' });
+  refreshWatchlist();
+}
+
+async function addCurrentToWatchlist() {
+  if (!currentSymbol) { alert('먼저 종목을 검색해서 선택하세요.'); return; }
+  await fetch('/api/watchlist', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(currentSymbol),
+  });
+  refreshWatchlist();
+}
+
+async function refreshHoldings() {
+  const res = await fetch('/api/holdings');
+  const items = await res.json();
+  document.getElementById('holdings-body').innerHTML = items.map(i => `
+    <tr><td>${i.code}</td><td>${i.name}</td><td>${i.shares}</td><td>${Math.round(i.avg_price).toLocaleString()}</td></tr>
+  `).join('') || '<tr><td colspan="4" class="muted">보유 중인 종목이 없습니다.</td></tr>';
+}
+
+async function refreshJournal() {
+  const res = await fetch('/api/trades');
+  const items = await res.json();
+  document.getElementById('journal-body').innerHTML = items.map(i => `
+    <tr>
+      <td>${i.traded_at.slice(0,16).replace('T',' ')}</td><td>${i.code}</td><td>${i.name}</td>
+      <td class="${i.side}">${i.side === 'buy' ? '매수' : '매도'}</td>
+      <td>${i.shares}</td><td>${Math.round(i.price).toLocaleString()}</td><td>${i.note || ''}</td>
+    </tr>`).join('') || '<tr><td colspan="7" class="muted">매매 기록이 없습니다.</td></tr>';
+}
+
+async function addTrade() {
+  const body = {
+    code: document.getElementById('j-code').value.trim(),
+    name: document.getElementById('j-name').value.trim(),
+    side: document.getElementById('j-side').value,
+    shares: parseInt(document.getElementById('j-shares').value, 10),
+    price: parseFloat(document.getElementById('j-price').value),
+    note: document.getElementById('j-note').value.trim(),
+  };
+  if (!body.code || !body.name || !body.shares || !body.price) { alert('코드/이름/수량/가격을 입력하세요.'); return; }
+  await fetch('/api/trades', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  ['j-code','j-name','j-shares','j-price','j-note'].forEach(id => document.getElementById(id).value = '');
+  refreshAll();
+}
+
+function refreshAll() {
+  refreshWatchlist();
+  refreshHoldings();
+  refreshJournal();
+}
+
+initChart();
+refreshAll();
+</script>
+</body>
+</html>
