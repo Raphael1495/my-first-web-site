@@ -36,15 +36,41 @@ def search(q: str):
     return search_symbols(q)
 
 
+# 야후 파이낸스가 기본 지원하지 않는 간격(3분/10분)은 더 잘게 받아와서 리샘플링한다.
+# 분봉은 야후 정책상 최근 며칠~한두 달치만 제공되니 interval별로 조회 기간도 다르게 잡는다.
+INTERVAL_CONFIG = {
+    "1d": {"yf_interval": "1d", "period": "3y"},
+    "1wk": {"yf_interval": "1wk", "period": "5y"},
+    "1mo": {"yf_interval": "1mo", "period": "10y"},
+    "1m": {"yf_interval": "1m", "period": "5d"},
+    "3m": {"yf_interval": "1m", "period": "5d", "resample": "3min"},
+    "5m": {"yf_interval": "5m", "period": "1mo"},
+    "10m": {"yf_interval": "5m", "period": "1mo", "resample": "10min"},
+    "30m": {"yf_interval": "30m", "period": "1mo"},
+    "60m": {"yf_interval": "60m", "period": "3mo"},
+}
+
+
 @app.get("/api/chart/{code}")
-def chart(code: str, period: str = "1y"):
+def chart(code: str, interval: str = "1d"):
+    cfg = INTERVAL_CONFIG.get(interval)
+    if not cfg:
+        raise HTTPException(status_code=400, detail=f"지원하지 않는 interval입니다: {interval}")
     try:
-        df = load_history(_yf_symbol(code), period=period)
+        df = load_history(_yf_symbol(code), period=cfg["period"], interval=cfg["yf_interval"])
+        if "resample" in cfg:
+            df = (
+                df.resample(cfg["resample"])
+                .agg({"Open": "first", "High": "max", "Low": "min", "Close": "last", "Volume": "sum"})
+                .dropna()
+            )
     except Exception as e:
         raise HTTPException(status_code=404, detail=str(e))
+
+    intraday = interval not in ("1d", "1wk", "1mo")
     return [
         {
-            "time": row.Index.strftime("%Y-%m-%d"),
+            "time": int(row.Index.timestamp()) if intraday else row.Index.strftime("%Y-%m-%d"),
             "open": row.Open,
             "high": row.High,
             "low": row.Low,
