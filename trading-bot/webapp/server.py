@@ -57,6 +57,7 @@ def chart(code: str, period: str = "1y"):
 class WatchlistItem(BaseModel):
     code: str
     name: str
+    group_name: str = db.DEFAULT_GROUP
 
 
 @app.get("/api/watchlist")
@@ -66,13 +67,37 @@ def get_watchlist():
 
 @app.post("/api/watchlist")
 def post_watchlist(item: WatchlistItem):
-    db.add_watchlist(item.code, item.name)
+    db.add_watchlist(item.code, item.name, item.group_name)
     return {"ok": True}
 
 
 @app.delete("/api/watchlist/{code}")
 def delete_watchlist(code: str):
     db.remove_watchlist(code)
+    return {"ok": True}
+
+
+class GroupItem(BaseModel):
+    name: str
+
+
+@app.get("/api/groups")
+def get_groups():
+    return db.list_groups()
+
+
+@app.post("/api/groups")
+def post_groups(item: GroupItem):
+    name = item.name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="그룹 이름을 입력하세요.")
+    db.add_group(name)
+    return {"ok": True}
+
+
+@app.delete("/api/groups/{name}")
+def delete_group(name: str):
+    db.remove_group(name)
     return {"ok": True}
 
 

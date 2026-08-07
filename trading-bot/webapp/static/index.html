@@ -17,14 +17,23 @@
   .search-results { position: absolute; left: 12px; right: 12px; top: 100%; background: #fff; border: 1px solid #d5d8de; border-radius: 6px; box-shadow: 0 4px 10px rgba(0,0,0,.08); max-height: 260px; overflow-y: auto; z-index: 10; }
   .search-results div { padding: 8px 10px; cursor: pointer; font-size: 13px; }
   .search-results div:hover { background: #f0f2f5; }
-  .watchlist-header { padding: 10px 12px 4px; font-size: 12px; color: #888; font-weight: 600; }
+  .watchlist-header { display: flex; align-items: center; justify-content: space-between; padding: 10px 12px 4px; }
+  .watchlist-header span { font-size: 12px; color: #888; font-weight: 600; }
+  .watchlist-header .add-group-btn { border: none; background: none; color: #3169d6; font-size: 16px; cursor: pointer; padding: 0 4px; line-height: 1; }
   .watchlist { flex: 1; overflow-y: auto; }
-  .watch-item { display: flex; justify-content: space-between; align-items: center; padding: 9px 12px; cursor: pointer; font-size: 13px; border-bottom: 1px solid #f0f1f3; }
+  .group-block { border-bottom: 1px solid #f0f1f3; }
+  .group-title { display: flex; align-items: center; justify-content: space-between; padding: 8px 12px 4px; font-size: 12px; color: #555; font-weight: 600; }
+  .group-title .del-group { color: #ccc; font-size: 11px; cursor: pointer; }
+  .group-title .del-group:hover { color: #ff5b5b; }
+  .watch-item { display: flex; justify-content: space-between; align-items: center; padding: 9px 12px; cursor: pointer; font-size: 13px; }
   .watch-item:hover { background: #f5f7fa; }
   .watch-item.active { background: #eaf1ff; }
   .watch-item .del { color: #bbb; font-size: 11px; padding: 2px 6px; }
   .watch-item .del:hover { color: #ff5b5b; }
   .watchlist .muted { padding: 12px; }
+  .indicator-toolbar { display: flex; gap: 14px; align-items: center; margin-bottom: 8px; font-size: 12px; color: #555; flex-wrap: wrap; }
+  .indicator-toolbar label { display: flex; align-items: center; gap: 4px; cursor: pointer; }
+  .ma5 { color: #e6a23c; } .ma20 { color: #d6362f; } .ma60 { color: #67c23a; } .ma120 { color: #9b59b6; } .bb-label { color: #3169d6; }
 
   /* 메인 영역 */
   main { flex: 1; overflow-y: auto; padding: 20px 24px; }
@@ -63,7 +72,10 @@
       <input id="search-input" placeholder="종목명 또는 코드 검색" autocomplete="off" />
       <div id="search-results" class="search-results" style="display:none;"></div>
     </div>
-    <div class="watchlist-header">관심종목</div>
+    <div class="watchlist-header">
+      <span>관심종목</span>
+      <button class="add-group-btn" onclick="createGroup()" title="그룹 추가">＋</button>
+    </div>
     <div id="watchlist" class="watchlist"></div>
   </aside>
 
@@ -74,7 +86,15 @@
       <span id="price-change" class="change"></span>
     </div>
     <div class="price-sub">
+      <select id="watch-group-select" style="padding:4px 8px; border-radius:6px; border:1px solid #d5d8de;"></select>
       <button id="add-watch-btn" onclick="addCurrentToWatchlist()">☆ 관심종목에 추가</button>
+    </div>
+    <div class="indicator-toolbar">
+      <label><input type="checkbox" id="ma5-toggle" checked onchange="updateIndicators()"><span class="ma5">■</span> 5일선</label>
+      <label><input type="checkbox" id="ma20-toggle" checked onchange="updateIndicators()"><span class="ma20">■</span> 20일선</label>
+      <label><input type="checkbox" id="ma60-toggle" checked onchange="updateIndicators()"><span class="ma60">■</span> 60일선</label>
+      <label><input type="checkbox" id="ma120-toggle" checked onchange="updateIndicators()"><span class="ma120">■</span> 120일선</label>
+      <label><input type="checkbox" id="bb-toggle" checked onchange="updateIndicators()"><span class="bb-label">■</span> 볼린저밴드(20)</label>
     </div>
     <div id="chart"></div>
 
@@ -112,7 +132,11 @@
 <script>
 let currentSymbol = null;
 let chart, series;
+let maSeries = {};
+let bbSeries = {};
 let watchlistCache = [];
+let groupsCache = [];
+let currentChartData = [];
 
 function initChart() {
   const el = document.getElementById('chart');
@@ -128,7 +152,55 @@ function initChart() {
     upColor: '#d6362f', downColor: '#3169d6', borderVisible: false,
     wickUpColor: '#d6362f', wickDownColor: '#3169d6',
   });
+
+  const maColors = { ma5: '#e6a23c', ma20: '#d6362f', ma60: '#67c23a', ma120: '#9b59b6' };
+  for (const [key, color] of Object.entries(maColors)) {
+    maSeries[key] = chart.addLineSeries({ color, lineWidth: 1, priceLineVisible: false, lastValueVisible: false });
+  }
+  bbSeries.upper = chart.addLineSeries({ color: '#3169d6', lineWidth: 1, lineStyle: 2, priceLineVisible: false, lastValueVisible: false });
+  bbSeries.lower = chart.addLineSeries({ color: '#3169d6', lineWidth: 1, lineStyle: 2, priceLineVisible: false, lastValueVisible: false });
+
   window.addEventListener('resize', () => chart.applyOptions({ width: el.clientWidth }));
+}
+
+function sma(data, period) {
+  const out = [];
+  for (let i = period - 1; i < data.length; i++) {
+    let sum = 0;
+    for (let j = i - period + 1; j <= i; j++) sum += data[j].close;
+    out.push({ time: data[i].time, value: sum / period });
+  }
+  return out;
+}
+
+function bollingerBands(data, period = 20, mult = 2) {
+  const upper = [], lower = [];
+  for (let i = period - 1; i < data.length; i++) {
+    const slice = data.slice(i - period + 1, i + 1).map(d => d.close);
+    const mean = slice.reduce((a, b) => a + b, 0) / period;
+    const variance = slice.reduce((a, b) => a + (b - mean) ** 2, 0) / period;
+    const std = Math.sqrt(variance);
+    upper.push({ time: data[i].time, value: mean + mult * std });
+    lower.push({ time: data[i].time, value: mean - mult * std });
+  }
+  return { upper, lower };
+}
+
+function updateIndicators() {
+  const toggles = { ma5: 5, ma20: 20, ma60: 60, ma120: 120 };
+  for (const [key, period] of Object.entries(toggles)) {
+    const on = document.getElementById(key + '-toggle').checked;
+    maSeries[key].setData(on && currentChartData.length ? sma(currentChartData, period) : []);
+  }
+  const bbOn = document.getElementById('bb-toggle').checked;
+  if (bbOn && currentChartData.length) {
+    const { upper, lower } = bollingerBands(currentChartData, 20, 2);
+    bbSeries.upper.setData(upper);
+    bbSeries.lower.setData(lower);
+  } else {
+    bbSeries.upper.setData([]);
+    bbSeries.lower.setData([]);
+  }
 }
 
 async function loadChart(code, name) {
@@ -143,7 +215,9 @@ async function loadChart(code, name) {
     return;
   }
   const data = await res.json();
+  currentChartData = data;
   series.setData(data);
+  updateIndicators();
   chart.timeScale().fitContent();
 
   if (data.length >= 2) {
@@ -199,15 +273,55 @@ function highlightActiveWatch() {
   });
 }
 
+async function refreshGroups() {
+  const res = await fetch('/api/groups');
+  groupsCache = await res.json();
+  const select = document.getElementById('watch-group-select');
+  const prevValue = select.value;
+  select.innerHTML = groupsCache.map(g => `<option value="${g.name}">${g.name}</option>`).join('');
+  if (groupsCache.some(g => g.name === prevValue)) select.value = prevValue;
+}
+
+async function createGroup() {
+  const name = prompt('새 그룹 이름을 입력하세요');
+  if (!name || !name.trim()) return;
+  await fetch('/api/groups', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name: name.trim() }),
+  });
+  await refreshGroups();
+  refreshWatchlist();
+}
+
+async function removeGroup(name) {
+  if (!confirm(`'${name}' 그룹을 삭제할까요? (안의 종목은 기본 그룹으로 이동됩니다)`)) return;
+  await fetch(`/api/groups/${encodeURIComponent(name)}`, { method: 'DELETE' });
+  await refreshGroups();
+  refreshWatchlist();
+}
+
 async function refreshWatchlist() {
   const res = await fetch('/api/watchlist');
   watchlistCache = await res.json();
   const el = document.getElementById('watchlist');
-  el.innerHTML = watchlistCache.map(i => `
-    <div class="watch-item" data-code="${i.code}" onclick="loadChart('${i.code}', '${i.name}')">
-      <span>${i.name}</span>
-      <span class="del" onclick="event.stopPropagation(); removeWatch('${i.code}')">✕</span>
-    </div>`).join('') || '<div class="muted">관심종목이 없습니다.<br>종목 검색 후 추가하세요.</div>';
+
+  if (watchlistCache.length === 0 && groupsCache.length <= 1) {
+    el.innerHTML = '<div class="muted">관심종목이 없습니다.<br>종목 검색 후 추가하세요.</div>';
+  } else {
+    const order = groupsCache.map(g => g.name);
+    const byGroup = {};
+    for (const item of watchlistCache) (byGroup[item.group_name] ??= []).push(item);
+    el.innerHTML = order.map(groupName => {
+      const items = byGroup[groupName] || [];
+      const delBtn = groupName === '기본' ? '' : `<span class="del-group" onclick="removeGroup('${groupName}')">그룹삭제</span>`;
+      const rows = items.map(i => `
+        <div class="watch-item" data-code="${i.code}" onclick="loadChart('${i.code}', '${i.name}')">
+          <span>${i.name}</span>
+          <span class="del" onclick="event.stopPropagation(); removeWatch('${i.code}')">✕</span>
+        </div>`).join('') || '<div class="muted" style="padding:4px 12px;">비어있음</div>';
+      return `<div class="group-block"><div class="group-title"><span>${groupName}</span>${delBtn}</div>${rows}</div>`;
+    }).join('');
+  }
   highlightActiveWatch();
   document.getElementById('add-watch-btn').textContent =
     currentSymbol && watchlistCache.some(w => w.code === currentSymbol.code) ? '★ 관심종목에서 제거' : '☆ 관심종목에 추가';
@@ -222,9 +336,10 @@ async function addCurrentToWatchlist() {
   if (!currentSymbol) { alert('먼저 종목을 검색해서 선택하세요.'); return; }
   const already = watchlistCache.some(w => w.code === currentSymbol.code);
   if (already) { await removeWatch(currentSymbol.code); return; }
+  const groupName = document.getElementById('watch-group-select').value || '기본';
   await fetch('/api/watchlist', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(currentSymbol),
+    body: JSON.stringify({ ...currentSymbol, group_name: groupName }),
   });
   refreshWatchlist();
 }
@@ -268,7 +383,7 @@ async function addTrade() {
 }
 
 initChart();
-refreshWatchlist();
+refreshGroups().then(refreshWatchlist);
 refreshHoldings();
 refreshJournal();
 </script>
