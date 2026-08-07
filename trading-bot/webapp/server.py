@@ -7,6 +7,8 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+from backtest.engine import run_backtest as run_backtest_engine
+from config import Config, RiskLimits, StrategyParams
 from data.loader import load_history
 
 from . import db
@@ -24,6 +26,11 @@ def _yf_symbol(code: str) -> str:
     market = symbols.get(code, {}).get("market", "KOSPI")
     suffix = ".KQ" if market == "KOSDAQ" else ".KS"
     return f"{code}{suffix}"
+
+
+def _resolve_symbol(code: str) -> str:
+    """이미 야후 형식(.KS/.KQ, AAPL 등)이면 그대로, KRX 코드면 접미사를 붙여준다."""
+    return code if "." in code or not code.isdigit() else _yf_symbol(code)
 
 
 @app.get("/")
@@ -78,6 +85,21 @@ def chart(code: str, interval: str = "1d"):
         }
         for row in df.itertuples()
     ]
+
+
+@app.get("/api/quote/{code}")
+def quote(code: str):
+    try:
+        df = load_history(_yf_symbol(code), period="5d", interval="1d")
+    except Exception as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    if len(df) == 0:
+        raise HTTPException(status_code=404, detail="데이터 없음")
+    last = df.iloc[-1]
+    prev = df.iloc[-2] if len(df) >= 2 else last
+    diff = float(last["Close"] - prev["Close"])
+    pct = (diff / float(prev["Close"]) * 100) if prev["Close"] else 0.0
+    return {"code": code, "price": float(last["Close"]), "diff": diff, "pct": round(pct, 2)}
 
 
 class WatchlistItem(BaseModel):
@@ -152,3 +174,67 @@ def post_trades(item: TradeItem):
 @app.get("/api/holdings")
 def get_holdings():
     return db.compute_holdings()
+
+
+@app.get("/api/trades/stats")
+def get_trade_stats():
+    return db.compute_trade_stats()
+
+
+class BacktestRequest(BaseModel):
+    symbols: list[str]
+    period: str = "3y"
+    initial_capital: float = 10_000_000.0
+    fast_ma: int = 20
+    slow_ma: int = 60
+    atr_period: int = 14
+    atr_stop_multiple: float = 2.0
+    risk_per_trade: float = 0.01
+    max_position_weight: float = 0.2
+    max_daily_loss: float = 0.03
+    max_open_positions: int = 5
+
+
+@app.post("/api/backtest")
+def run_backtest_api(req: BacktestRequest):
+    symbols = [s.strip() for s in req.symbols if s.strip()]
+    if not symbols:
+        raise HTTPException(status_code=400, detail="종목을 1개 이상 입력하세요.")
+    cfg = Config(
+        symbols=[_resolve_symbol(s) for s in symbols],
+        backtest_period=req.period,
+        initial_capital=req.initial_capital,
+        strategy=StrategyParams(
+            fast_ma=req.fast_ma,
+            slow_ma=req.slow_ma,
+            atr_period=req.atr_period,
+            atr_stop_multiple=req.atr_stop_multiple,
+            risk_per_trade=req.risk_per_trade,
+        ),
+        risk=RiskLimits(
+            max_position_weight=req.max_position_weight,
+            max_daily_loss=req.max_daily_loss,
+            max_open_positions=req.max_open_positions,
+        ),
+    )
+    try:
+        result = run_backtest_engine(cfg)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {
+        "metrics": result.metrics,
+        "equity_curve": [{"date": str(d.date()), "equity": v} for d, v in result.equity_curve.items()],
+        "trades": [
+            {
+                "symbol": t.symbol,
+                "entry_date": str(t.entry_date.date()),
+                "exit_date": str(t.exit_date.date()),
+                "entry_price": t.entry_price,
+                "exit_price": t.exit_price,
+                "shares": t.shares,
+                "pnl": t.pnl,
+                "reason": t.reason,
+            }
+            for t in result.trades
+        ],
+    }

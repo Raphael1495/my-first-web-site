@@ -25,9 +25,12 @@
   .group-title { display: flex; align-items: center; justify-content: space-between; padding: 8px 12px 4px; font-size: 12px; color: #555; font-weight: 600; }
   .group-title .del-group { color: #ccc; font-size: 11px; cursor: pointer; }
   .group-title .del-group:hover { color: #ff5b5b; }
-  .watch-item { display: flex; justify-content: space-between; align-items: center; padding: 9px 12px; cursor: pointer; font-size: 13px; }
+  .watch-item { display: flex; justify-content: space-between; align-items: center; padding: 9px 12px; cursor: pointer; font-size: 13px; gap: 6px; }
   .watch-item:hover { background: #f5f7fa; }
   .watch-item.active { background: #eaf1ff; }
+  .watch-item .name-col { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .watch-item .price-col { font-size: 12px; text-align: right; white-space: nowrap; color: #999; }
+  .watch-item .price-col.up { color: #d6362f; } .watch-item .price-col.down { color: #3169d6; }
   .watch-item .del { color: #bbb; font-size: 11px; padding: 2px 6px; }
   .watch-item .del:hover { color: #ff5b5b; }
   .watchlist .muted { padding: 12px; }
@@ -76,6 +79,17 @@
   .modal-box h3 { margin: 0 0 14px; font-size: 15px; }
   .modal-box .add-form { flex-direction: column; }
   .modal-box .add-form input { width: 100%; }
+
+  .pnl-summary { display: flex; gap: 24px; flex-wrap: wrap; background: #fff; border: 1px solid #e2e4e9; border-radius: 8px; padding: 14px 18px; margin-bottom: 16px; }
+  .pnl-stat .label { font-size: 12px; color: #999; margin-bottom: 2px; }
+  .pnl-stat .value { font-size: 17px; font-weight: 700; }
+  .pnl-stat .value.up { color: #d6362f; } .pnl-stat .value.down { color: #3169d6; }
+  .pnl-by-stock { margin-top: 4px; }
+
+  #backtest-chart { border: 1px solid #e2e4e9; border-radius: 8px; overflow: hidden; background: #fff; margin: 12px 0; }
+  .bt-form { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 12px; }
+  .bt-form input { padding: 6px 10px; border-radius: 6px; border: 1px solid #d5d8de; background: #f9fafb; font-size: 13px; }
+  .bt-form label { font-size: 12px; color: #666; display: flex; align-items: center; gap: 4px; }
 </style>
 </head>
 <body>
@@ -134,6 +148,7 @@
     <div class="tabs">
       <div class="tab active" data-panel="holdings">보유종목</div>
       <div class="tab" data-panel="journal">매매일지</div>
+      <div class="tab" data-panel="backtest">백테스트</div>
     </div>
 
     <div id="panel-holdings" class="panel active">
@@ -145,6 +160,7 @@
     </div>
 
     <div id="panel-journal" class="panel">
+      <div id="pnl-summary" class="pnl-summary"></div>
       <div class="add-form">
         <input id="j-code" placeholder="코드" style="width:80px" />
         <input id="j-name" placeholder="이름" style="width:100px" />
@@ -157,6 +173,24 @@
       <table>
         <thead><tr><th>일시</th><th>코드</th><th>이름</th><th>구분</th><th>수량</th><th>가격</th><th>메모</th></tr></thead>
         <tbody id="journal-body"></tbody>
+      </table>
+    </div>
+
+    <div id="panel-backtest" class="panel">
+      <div class="bt-form">
+        <input id="bt-symbols" placeholder="종목코드 (쉼표로 구분, 예: 005930,000660)" style="width:260px" />
+        <label>기간 <input id="bt-period" value="3y" style="width:50px" /></label>
+        <label>초기자산 <input id="bt-capital" type="number" value="10000000" style="width:110px" /></label>
+        <label>단기이평 <input id="bt-fast" type="number" value="20" style="width:50px" /></label>
+        <label>장기이평 <input id="bt-slow" type="number" value="60" style="width:50px" /></label>
+        <button class="primary" onclick="runBacktest()">백테스트 실행</button>
+      </div>
+      <div id="bt-status" class="muted"></div>
+      <div id="bt-metrics" class="pnl-summary" style="display:none;"></div>
+      <div id="backtest-chart" style="display:none; height:280px;"></div>
+      <table id="bt-trades-table" style="display:none;">
+        <thead><tr><th>종목</th><th>진입일</th><th>청산일</th><th>진입가</th><th>청산가</th><th>수량</th><th>손익</th><th>사유</th></tr></thead>
+        <tbody id="bt-trades-body"></tbody>
       </table>
     </div>
   </main>
@@ -377,7 +411,8 @@ async function refreshWatchlist() {
       const delBtn = groupName === '기본' ? '' : `<span class="del-group" onclick="removeGroup('${groupName}')">그룹삭제</span>`;
       const rows = items.map(i => `
         <div class="watch-item" data-code="${i.code}" onclick="loadChart('${i.code}', '${i.name}')">
-          <span>${i.name}</span>
+          <span class="name-col">${i.name}</span>
+          <span class="price-col" id="wprice-${i.code}">…</span>
           <span class="del" onclick="event.stopPropagation(); removeWatch('${i.code}')">✕</span>
         </div>`).join('') || '<div class="muted" style="padding:4px 12px;">비어있음</div>';
       return `<div class="group-block"><div class="group-title"><span>${groupName}</span>${delBtn}</div>${rows}</div>`;
@@ -386,6 +421,24 @@ async function refreshWatchlist() {
   highlightActiveWatch();
   document.getElementById('add-watch-btn').textContent =
     currentSymbol && watchlistCache.some(w => w.code === currentSymbol.code) ? '★ 관심종목에서 제거' : '☆ 관심종목에 추가';
+  loadWatchPrices();
+}
+
+async function loadWatchPrices() {
+  await Promise.allSettled(watchlistCache.map(async (i) => {
+    const el = document.getElementById(`wprice-${i.code}`);
+    if (!el) return;
+    try {
+      const res = await fetch(`/api/quote/${i.code}`);
+      if (!res.ok) { el.textContent = '-'; return; }
+      const q = await res.json();
+      const up = q.diff >= 0;
+      el.textContent = `${Math.round(q.price).toLocaleString()} (${up ? '+' : ''}${q.pct}%)`;
+      el.className = 'price-col ' + (up ? 'up' : 'down');
+    } catch {
+      el.textContent = '-';
+    }
+  }));
 }
 
 async function removeWatch(code) {
@@ -422,6 +475,21 @@ async function refreshJournal() {
       <td class="${i.side}">${i.side === 'buy' ? '매수' : '매도'}</td>
       <td>${i.shares}</td><td>${Math.round(i.price).toLocaleString()}</td><td>${i.note || ''}</td>
     </tr>`).join('') || '<tr><td colspan="7" class="muted">매매 기록이 없습니다.</td></tr>';
+  refreshPnlSummary();
+}
+
+async function refreshPnlSummary() {
+  const res = await fetch('/api/trades/stats');
+  const s = await res.json();
+  const up = s.total_realized_pnl >= 0;
+  const byStockRows = s.by_stock.slice(0, 5).map(b =>
+    `<span style="margin-right:14px;">${b.name} <b class="${b.pnl >= 0 ? 'buy' : 'sell'}">${b.pnl >= 0 ? '+' : ''}${Math.round(b.pnl).toLocaleString()}</b></span>`
+  ).join('') || '<span class="muted">매도 기록 없음</span>';
+  document.getElementById('pnl-summary').innerHTML = `
+    <div class="pnl-stat"><div class="label">누적 실현손익</div><div class="value ${up ? 'up' : 'down'}">${up ? '+' : ''}${Math.round(s.total_realized_pnl).toLocaleString()}원</div></div>
+    <div class="pnl-stat"><div class="label">매도 승률</div><div class="value">${s.win_rate}% <span class="muted">(${s.sell_count}건)</span></div></div>
+    <div class="pnl-stat" style="flex:1;"><div class="label">종목별 손익</div><div class="pnl-by-stock">${byStockRows}</div></div>
+  `;
 }
 
 async function addTrade() {
@@ -474,6 +542,66 @@ async function submitOrder() {
   closeOrderModal();
   refreshJournal();
   refreshHoldings();
+}
+
+let btChart, btSeries;
+function ensureBacktestChart() {
+  if (btChart) return;
+  const el = document.getElementById('backtest-chart');
+  btChart = LightweightCharts.createChart(el, {
+    width: el.clientWidth,
+    height: 280,
+    layout: { background: { color: '#ffffff' }, textColor: '#333' },
+    grid: { vertLines: { color: '#f0f1f3' }, horzLines: { color: '#f0f1f3' } },
+    timeScale: { borderColor: '#e2e4e9' },
+    rightPriceScale: { borderColor: '#e2e4e9' },
+  });
+  btSeries = btChart.addLineSeries({ color: '#3169d6', lineWidth: 2 });
+  window.addEventListener('resize', () => btChart.applyOptions({ width: el.clientWidth }));
+}
+
+async function runBacktest() {
+  const symbolsRaw = document.getElementById('bt-symbols').value.trim();
+  if (!symbolsRaw) { alert('종목 코드를 1개 이상 입력하세요 (쉼표로 구분).'); return; }
+  const body = {
+    symbols: symbolsRaw.split(',').map(s => s.trim()).filter(Boolean),
+    period: document.getElementById('bt-period').value.trim() || '3y',
+    initial_capital: parseFloat(document.getElementById('bt-capital').value) || 10000000,
+    fast_ma: parseInt(document.getElementById('bt-fast').value, 10) || 20,
+    slow_ma: parseInt(document.getElementById('bt-slow').value, 10) || 60,
+  };
+  document.getElementById('bt-status').textContent = '실행 중... (종목이 많거나 기간이 길면 시간이 걸려요)';
+  const res = await fetch('/api/backtest', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  const data = await res.json();
+  if (!res.ok) {
+    document.getElementById('bt-status').textContent = `실패: ${data.detail || '알 수 없는 오류'}`;
+    return;
+  }
+  document.getElementById('bt-status').textContent = '';
+
+  const metricsEl = document.getElementById('bt-metrics');
+  metricsEl.style.display = 'flex';
+  metricsEl.innerHTML = Object.entries(data.metrics).map(([k, v]) => `
+    <div class="pnl-stat"><div class="label">${k}</div><div class="value">${typeof v === 'number' ? v.toLocaleString() : v}</div></div>
+  `).join('');
+
+  document.getElementById('backtest-chart').style.display = 'block';
+  ensureBacktestChart();
+  btSeries.setData(data.equity_curve.map(p => ({ time: p.date, value: p.equity })));
+  btChart.timeScale().fitContent();
+
+  document.getElementById('bt-trades-table').style.display = 'table';
+  document.getElementById('bt-trades-body').innerHTML = data.trades.slice(-30).reverse().map(t => `
+    <tr>
+      <td>${t.symbol}</td><td>${t.entry_date}</td><td>${t.exit_date}</td>
+      <td>${Math.round(t.entry_price).toLocaleString()}</td><td>${Math.round(t.exit_price).toLocaleString()}</td>
+      <td>${t.shares}</td>
+      <td class="${t.pnl >= 0 ? 'buy' : 'sell'}">${t.pnl >= 0 ? '+' : ''}${Math.round(t.pnl).toLocaleString()}</td>
+      <td>${t.reason}</td>
+    </tr>`).join('') || '<tr><td colspan="8" class="muted">거래 없음</td></tr>';
 }
 
 initChart();

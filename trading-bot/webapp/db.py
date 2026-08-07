@@ -136,3 +136,46 @@ def compute_holdings() -> list:
         else:
             pos["shares"] -= t["shares"]
     return [p for p in positions.values() if p["shares"] > 0]
+
+
+def compute_trade_stats() -> dict:
+    """평단가 기준으로 매도 시점마다 실현손익을 계산해 요약 통계를 낸다."""
+    trades = sorted(list_trades(), key=lambda t: t["traded_at"])
+    positions: dict[str, dict] = {}
+    realized: list[dict] = []
+    for t in trades:
+        pos = positions.setdefault(t["code"], {"name": t["name"], "shares": 0, "avg_price": 0.0})
+        if t["side"] == "buy":
+            total_cost = pos["avg_price"] * pos["shares"] + t["price"] * t["shares"]
+            pos["shares"] += t["shares"]
+            pos["avg_price"] = total_cost / pos["shares"] if pos["shares"] > 0 else 0.0
+        else:
+            sell_shares = min(t["shares"], pos["shares"]) if pos["shares"] > 0 else 0
+            pnl = (t["price"] - pos["avg_price"]) * sell_shares
+            realized.append(
+                {"code": t["code"], "name": t["name"], "traded_at": t["traded_at"], "shares": sell_shares, "pnl": pnl}
+            )
+            pos["shares"] -= t["shares"]
+
+    total_pnl = sum(r["pnl"] for r in realized)
+    wins = [r for r in realized if r["pnl"] > 0]
+    win_rate = round(len(wins) / len(realized) * 100, 1) if realized else 0.0
+
+    by_stock: dict[str, dict] = {}
+    for r in realized:
+        s = by_stock.setdefault(r["code"], {"code": r["code"], "name": r["name"], "pnl": 0.0, "count": 0})
+        s["pnl"] += r["pnl"]
+        s["count"] += 1
+
+    by_month: dict[str, float] = {}
+    for r in realized:
+        month = r["traded_at"][:7]
+        by_month[month] = by_month.get(month, 0.0) + r["pnl"]
+
+    return {
+        "total_realized_pnl": total_pnl,
+        "sell_count": len(realized),
+        "win_rate": win_rate,
+        "by_stock": sorted(by_stock.values(), key=lambda x: -abs(x["pnl"])),
+        "by_month": [{"month": m, "pnl": p} for m, p in sorted(by_month.items())],
+    }
