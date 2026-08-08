@@ -13,6 +13,7 @@ from data.loader import load_history
 
 from . import db
 from .krx_symbols import load_symbols, search_symbols
+from .overseas_symbols import search_overseas_symbols
 
 app = FastAPI(title="주식 자동매매 대시보드")
 db.init_db()
@@ -28,6 +29,11 @@ def _yf_symbol(code: str) -> str:
     return f"{code}{suffix}"
 
 
+def _chart_symbol(code: str, market: str) -> str:
+    """국내는 야후용 접미사(.KS/.KQ)를 붙이고, 해외는 티커를 그대로 쓴다."""
+    return code if market == "overseas" else _yf_symbol(code)
+
+
 def _resolve_symbol(code: str) -> str:
     """이미 야후 형식(.KS/.KQ, AAPL 등)이면 그대로, KRX 코드면 접미사를 붙여준다."""
     return code if "." in code or not code.isdigit() else _yf_symbol(code)
@@ -39,8 +45,8 @@ def index():
 
 
 @app.get("/api/search")
-def search(q: str):
-    return search_symbols(q)
+def search(q: str, market: str = "domestic"):
+    return search_overseas_symbols(q) if market == "overseas" else search_symbols(q)
 
 
 # 야후 파이낸스가 기본 지원하지 않는 간격(3분/10분)은 더 잘게 받아와서 리샘플링한다.
@@ -59,12 +65,12 @@ INTERVAL_CONFIG = {
 
 
 @app.get("/api/chart/{code}")
-def chart(code: str, interval: str = "1d"):
+def chart(code: str, interval: str = "1d", market: str = "domestic"):
     cfg = INTERVAL_CONFIG.get(interval)
     if not cfg:
         raise HTTPException(status_code=400, detail=f"지원하지 않는 interval입니다: {interval}")
     try:
-        df = load_history(_yf_symbol(code), period=cfg["period"], interval=cfg["yf_interval"])
+        df = load_history(_chart_symbol(code, market), period=cfg["period"], interval=cfg["yf_interval"])
         if "resample" in cfg:
             df = (
                 df.resample(cfg["resample"])
@@ -88,9 +94,9 @@ def chart(code: str, interval: str = "1d"):
 
 
 @app.get("/api/quote/{code}")
-def quote(code: str):
+def quote(code: str, market: str = "domestic"):
     try:
-        df = load_history(_yf_symbol(code), period="5d", interval="1d")
+        df = load_history(_chart_symbol(code, market), period="5d", interval="1d")
     except Exception as e:
         raise HTTPException(status_code=404, detail=str(e))
     if len(df) == 0:
@@ -135,6 +141,8 @@ class WatchlistItem(BaseModel):
     code: str
     name: str
     group_name: str = db.DEFAULT_GROUP
+    market: str = "domestic"
+    exchange: str | None = None
 
 
 @app.get("/api/watchlist")
@@ -144,7 +152,7 @@ def get_watchlist():
 
 @app.post("/api/watchlist")
 def post_watchlist(item: WatchlistItem):
-    db.add_watchlist(item.code, item.name, item.group_name)
+    db.add_watchlist(item.code, item.name, item.group_name, item.market, item.exchange)
     return {"ok": True}
 
 
@@ -185,6 +193,8 @@ class TradeItem(BaseModel):
     shares: int
     price: float
     note: str = ""
+    market: str = "domestic"
+    exchange: str = "NASD"
 
 
 @app.get("/api/trades")
@@ -218,7 +228,10 @@ def place_order_api(req: OrderRequest):
             from broker.kis import KISBroker  # .env/자격증명 없이도 대시보드가 뜨도록 지연 임포트
 
             broker = KISBroker(CONFIG)
-            broker_result = broker.place_order(req.code, req.side, req.shares)
+            if req.market == "overseas":
+                broker_result = broker.place_order_overseas(req.code, req.side, req.shares, req.price, req.exchange)
+            else:
+                broker_result = broker.place_order(req.code, req.side, req.shares)
         except Exception as e:
             broker_error = str(e)
 

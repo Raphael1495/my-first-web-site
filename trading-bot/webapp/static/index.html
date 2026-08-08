@@ -99,6 +99,11 @@
   #hoga-panel .hoga-price { text-align: center; font-weight: 600; background: #f7f8fa; }
   .ask-side { color: #d6362f; } .bid-side { color: #3169d6; }
   .hoga-note { font-size: 11px; color: #aaa; padding: 6px 8px; border-top: 1px solid #f0f1f3; }
+
+  .market-toggle { display: flex; gap: 6px; padding: 10px 12px 0; }
+  .market-btn { flex: 1; padding: 6px 0; font-size: 12px; text-align: center; }
+  .market-btn.active { background: #3169d6; color: #fff; border-color: #3169d6; }
+  .exchange-tag { font-size: 10px; color: #999; margin-left: 4px; }
 </style>
 </head>
 <body>
@@ -106,6 +111,10 @@
 <div class="app">
   <aside class="sidebar">
     <h1>주식 자동매매 대시보드</h1>
+    <div class="market-toggle">
+      <button class="market-btn active" data-market="domestic" onclick="setMarket('domestic', this)">국내</button>
+      <button class="market-btn" data-market="overseas" onclick="setMarket('overseas', this)">해외</button>
+    </div>
     <div class="search-box">
       <input id="search-input" placeholder="종목명 또는 코드 검색" autocomplete="off" />
       <div id="search-results" class="search-results" style="display:none;"></div>
@@ -225,8 +234,15 @@
       <input id="o-price" type="number" placeholder="가격" />
       <input id="o-note" placeholder="메모 (선택)" />
     </div>
+    <div id="o-exchange-row" style="margin-top:8px; display:none;">
+      <select id="o-exchange" style="width:100%; padding:6px 10px; border-radius:6px; border:1px solid #d5d8de;">
+        <option value="NASD">나스닥 (NASD)</option>
+        <option value="NYSE">뉴욕 (NYSE)</option>
+        <option value="AMEX">아멕스 (AMEX)</option>
+      </select>
+    </div>
     <label style="display:flex; align-items:center; gap:6px; margin-top:10px; font-size:13px;">
-      <input type="checkbox" id="o-real-order" checked /> KIS 계좌에도 실제 주문 전송 (국내주식만)
+      <input type="checkbox" id="o-real-order" checked /> <span id="o-real-order-label">KIS 계좌에도 실제 주문 전송</span>
     </label>
     <div style="display:flex; gap:8px; justify-content:flex-end; margin-top:14px;">
       <button onclick="closeOrderModal()">취소</button>
@@ -244,6 +260,16 @@ let watchlistCache = [];
 let groupsCache = [];
 let currentChartData = [];
 let currentInterval = '1d';
+let currentMarket = 'domestic';
+
+function setMarket(market, btnEl) {
+  currentMarket = market;
+  document.querySelectorAll('.market-btn').forEach(b => b.classList.remove('active'));
+  btnEl.classList.add('active');
+  searchInput.placeholder = market === 'overseas' ? '해외 티커 검색 (예: AAPL, Apple)' : '종목명 또는 코드 검색';
+  searchInput.value = '';
+  searchResults.style.display = 'none';
+}
 
 function initChart() {
   const el = document.getElementById('chart');
@@ -366,12 +392,17 @@ function renderHoga(data) {
   body.innerHTML = html;
 }
 
-async function loadChart(code, name) {
-  currentSymbol = { code, name };
+async function loadChart(code, name, market, exchange) {
+  currentSymbol = { code, name, market: market || 'domestic', exchange: exchange || 'NASD' };
   document.getElementById('chart-title').textContent = `${name} (${code})`;
   highlightActiveWatch();
-  if (document.getElementById('hoga-toggle').checked) fetchHoga();
-  const res = await fetch(`/api/chart/${code}?interval=${currentInterval}`);
+
+  const hogaToggle = document.getElementById('hoga-toggle');
+  hogaToggle.disabled = currentSymbol.market === 'overseas';
+  if (currentSymbol.market === 'overseas') { hogaToggle.checked = false; toggleHoga(); }
+  else if (hogaToggle.checked) fetchHoga();
+
+  const res = await fetch(`/api/chart/${code}?interval=${currentInterval}&market=${currentSymbol.market}`);
   if (!res.ok) {
     document.getElementById('price-now').textContent = '';
     document.getElementById('price-change').textContent = '';
@@ -384,12 +415,13 @@ async function loadChart(code, name) {
   updateIndicators();
   chart.timeScale().fitContent();
 
+  const unit = currentSymbol.market === 'overseas' ? '$' : '원';
   if (data.length >= 2) {
     const last = data[data.length - 1], prev = data[data.length - 2];
     const diff = last.close - prev.close;
     const pct = (diff / prev.close * 100).toFixed(2);
     const up = diff >= 0;
-    document.getElementById('price-now').textContent = Math.round(last.close).toLocaleString() + '원';
+    document.getElementById('price-now').textContent = Math.round(last.close).toLocaleString() + unit;
     const chEl = document.getElementById('price-change');
     chEl.textContent = `${up ? '▲' : '▼'} ${Math.abs(diff).toLocaleString()} (${up ? '+' : ''}${pct}%)`;
     chEl.className = 'change ' + (up ? 'up' : 'down');
@@ -404,11 +436,12 @@ searchInput.addEventListener('input', () => {
   const q = searchInput.value.trim();
   if (!q) { searchResults.style.display = 'none'; return; }
   searchTimer = setTimeout(async () => {
-    const res = await fetch(`/api/search?q=${encodeURIComponent(q)}`);
+    const res = await fetch(`/api/search?q=${encodeURIComponent(q)}&market=${currentMarket}`);
     const items = await res.json();
-    searchResults.innerHTML = items.map(i =>
-      `<div onclick="selectSymbol('${i.code}', '${i.name}')">${i.name} (${i.code}) · ${i.market}</div>`
-    ).join('') || '<div class="muted">검색 결과 없음</div>';
+    searchResults.innerHTML = items.map(i => {
+      const tag = currentMarket === 'overseas' ? i.exchange : i.market;
+      return `<div onclick="selectSymbol('${i.code}', '${i.name}', '${currentMarket}', '${i.exchange || ''}')">${i.name} (${i.code}) · ${tag}</div>`;
+    }).join('') || '<div class="muted">검색 결과 없음</div>';
     searchResults.style.display = 'block';
   }, 250);
 });
@@ -416,10 +449,10 @@ document.addEventListener('click', (e) => {
   if (!e.target.closest('.search-box')) searchResults.style.display = 'none';
 });
 
-function selectSymbol(code, name) {
+function selectSymbol(code, name, market, exchange) {
   searchInput.value = '';
   searchResults.style.display = 'none';
-  loadChart(code, name);
+  loadChart(code, name, market, exchange);
 }
 
 document.querySelectorAll('.tab').forEach(tab => {
@@ -479,8 +512,8 @@ async function refreshWatchlist() {
       const items = byGroup[groupName] || [];
       const delBtn = groupName === '기본' ? '' : `<span class="del-group" onclick="removeGroup('${groupName}')">그룹삭제</span>`;
       const rows = items.map(i => `
-        <div class="watch-item" data-code="${i.code}" onclick="loadChart('${i.code}', '${i.name}')">
-          <span class="name-col">${i.name}</span>
+        <div class="watch-item" data-code="${i.code}" onclick="loadChart('${i.code}', '${i.name}', '${i.market}', '${i.exchange || ''}')">
+          <span class="name-col">${i.name}${i.market === 'overseas' ? '<span class="exchange-tag">해외</span>' : ''}</span>
           <span class="price-col" id="wprice-${i.code}">…</span>
           <span class="del" onclick="event.stopPropagation(); removeWatch('${i.code}')">✕</span>
         </div>`).join('') || '<div class="muted" style="padding:4px 12px;">비어있음</div>';
@@ -498,7 +531,7 @@ async function loadWatchPrices() {
     const el = document.getElementById(`wprice-${i.code}`);
     if (!el) return;
     try {
-      const res = await fetch(`/api/quote/${i.code}`);
+      const res = await fetch(`/api/quote/${i.code}?market=${i.market || 'domestic'}`);
       if (!res.ok) { el.textContent = '-'; return; }
       const q = await res.json();
       const up = q.diff >= 0;
@@ -598,6 +631,11 @@ function openOrderModal(side) {
     currentChartData.length ? Math.round(currentChartData[currentChartData.length - 1].close) : '';
   document.getElementById('o-note').value = '';
   document.getElementById('o-real-order').checked = true;
+  const isOverseas = currentSymbol.market === 'overseas';
+  document.getElementById('o-exchange-row').style.display = isOverseas ? 'block' : 'none';
+  document.getElementById('o-exchange').value = currentSymbol.exchange || 'NASD';
+  document.getElementById('o-real-order-label').textContent =
+    isOverseas ? 'KIS 계좌에도 실제 주문 전송 (해외, 미검증 - 신중히)' : 'KIS 계좌에도 실제 주문 전송';
   document.getElementById('order-modal').style.display = 'flex';
 }
 
@@ -616,6 +654,8 @@ async function submitOrder() {
       code: currentSymbol.code, name: currentSymbol.name, side: orderSide,
       shares, price, note: document.getElementById('o-note').value.trim(),
       place_real_order: placeReal,
+      market: currentSymbol.market || 'domestic',
+      exchange: document.getElementById('o-exchange').value,
     }),
   });
   const data = await res.json();

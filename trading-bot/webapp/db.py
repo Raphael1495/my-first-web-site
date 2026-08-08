@@ -42,10 +42,14 @@ def init_db():
             traded_at TEXT NOT NULL
         )"""
     )
-    # 기존 DB(그룹 기능 이전에 만들어진)에는 watchlist.group_name 컬럼이 없을 수 있어 보강한다.
+    # 기존 DB(그룹/해외 기능 이전에 만들어진)에는 컬럼이 없을 수 있어 보강한다.
     existing_cols = {row["name"] for row in conn.execute("PRAGMA table_info(watchlist)")}
     if "group_name" not in existing_cols:
         conn.execute(f"ALTER TABLE watchlist ADD COLUMN group_name TEXT NOT NULL DEFAULT '{DEFAULT_GROUP}'")
+    if "market" not in existing_cols:
+        conn.execute("ALTER TABLE watchlist ADD COLUMN market TEXT NOT NULL DEFAULT 'domestic'")
+    if "exchange" not in existing_cols:
+        conn.execute("ALTER TABLE watchlist ADD COLUMN exchange TEXT")
     conn.execute(
         "INSERT OR IGNORE INTO watch_groups (name, created_at) VALUES (?, ?)",
         (DEFAULT_GROUP, datetime.now().isoformat()),
@@ -82,11 +86,13 @@ def list_groups() -> list:
     return [dict(r) for r in rows]
 
 
-def add_watchlist(code: str, name: str, group_name: str = DEFAULT_GROUP):
+def add_watchlist(
+    code: str, name: str, group_name: str = DEFAULT_GROUP, market: str = "domestic", exchange: str | None = None
+):
     conn = get_conn()
     conn.execute(
-        "INSERT OR IGNORE INTO watchlist (code, name, group_name, added_at) VALUES (?, ?, ?, ?)",
-        (code, name, group_name, datetime.now().isoformat()),
+        "INSERT OR IGNORE INTO watchlist (code, name, group_name, market, exchange, added_at) VALUES (?, ?, ?, ?, ?, ?)",
+        (code, name, group_name, market, exchange, datetime.now().isoformat()),
     )
     conn.commit()
     conn.close()
