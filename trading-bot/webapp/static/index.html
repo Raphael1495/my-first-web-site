@@ -450,11 +450,28 @@ searchInput.addEventListener('input', () => {
 });
 searchInput.addEventListener('keydown', (e) => {
   if (e.key !== 'Tab' && e.key !== 'Enter') return;
-  if (!searchItems.length) return;
-  e.preventDefault();
-  const i = searchItems[0];
-  selectSymbol(i.code, i.name, currentMarket, i.exchange || '');
-  if (e.key === 'Enter') addCurrentToWatchlist();
+  if (searchItems.length) {
+    e.preventDefault();
+    const i = searchItems[0];
+    selectSymbol(i.code, i.name, currentMarket, i.exchange || '');
+    if (e.key === 'Enter') addCurrentToWatchlist();
+    return;
+  }
+  // Tab으로 이미 선택해둔 상태(검색창 비어있음)에서 Enter만 누르면 관심종목에 저장
+  if (e.key === 'Enter' && currentSymbol) {
+    e.preventDefault();
+    addCurrentToWatchlist();
+  }
+});
+document.addEventListener('keydown', (e) => {
+  if (!(e.metaKey || e.ctrlKey)) return;
+  if (e.key === '1') {
+    e.preventDefault();
+    setMarket('domestic', document.querySelector('.market-btn[data-market="domestic"]'));
+  } else if (e.key === '2') {
+    e.preventDefault();
+    setMarket('overseas', document.querySelector('.market-btn[data-market="overseas"]'));
+  }
 });
 document.addEventListener('click', (e) => {
   if (!e.target.closest('.search-box')) searchResults.style.display = 'none';
