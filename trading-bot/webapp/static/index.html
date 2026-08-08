@@ -90,6 +90,15 @@
   .bt-form { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 12px; }
   .bt-form input { padding: 6px 10px; border-radius: 6px; border: 1px solid #d5d8de; background: #f9fafb; font-size: 13px; }
   .bt-form label { font-size: 12px; color: #666; display: flex; align-items: center; gap: 4px; }
+
+  .chart-hoga-row { display: flex; gap: 12px; }
+  .chart-hoga-row #chart { flex: 1; min-width: 0; }
+  #hoga-panel { width: 190px; flex-shrink: 0; border: 1px solid #e2e4e9; border-radius: 8px; background: #fff; overflow: hidden; }
+  #hoga-panel table { font-size: 12px; }
+  #hoga-panel th, #hoga-panel td { padding: 4px 6px; text-align: right; border-bottom: none; }
+  #hoga-panel .hoga-price { text-align: center; font-weight: 600; background: #f7f8fa; }
+  .ask-side { color: #d6362f; } .bid-side { color: #3169d6; }
+  .hoga-note { font-size: 11px; color: #aaa; padding: 6px 8px; border-top: 1px solid #f0f1f3; }
 </style>
 </head>
 <body>
@@ -119,6 +128,9 @@
       <button id="add-watch-btn" onclick="addCurrentToWatchlist()">☆ 관심종목에 추가</button>
       <button class="btn-buy" onclick="openOrderModal('buy')">매수</button>
       <button class="btn-sell" onclick="openOrderModal('sell')">매도</button>
+      <label style="font-size:12px; color:#666; display:flex; align-items:center; gap:4px; margin-left:8px;">
+        <input type="checkbox" id="hoga-toggle" onchange="toggleHoga()" /> 호가창 (폴링, 국내주식만)
+      </label>
       <span class="muted">(국내주식만 KIS 연동 지원, 해외주식은 매매일지 기록만 됩니다)</span>
     </div>
     <div class="tf-toolbar">
@@ -143,7 +155,16 @@
       <label><input type="checkbox" id="ma120-toggle" checked onchange="updateIndicators()"><span class="ma120">■</span> 120일선</label>
       <label><input type="checkbox" id="bb-toggle" checked onchange="updateIndicators()"><span class="bb-label">■</span> 볼린저밴드(20)</label>
     </div>
-    <div id="chart"></div>
+    <div class="chart-hoga-row">
+      <div id="chart"></div>
+      <div id="hoga-panel" style="display:none;">
+        <table>
+          <thead><tr><th>매도잔량</th><th>호가</th><th>매수잔량</th></tr></thead>
+          <tbody id="hoga-body"></tbody>
+        </table>
+        <div class="hoga-note">1~2초 간격 새로고침 (실시간 아님)</div>
+      </div>
+    </div>
 
     <div class="tabs">
       <div class="tab active" data-panel="holdings">보유종목</div>
@@ -301,10 +322,55 @@ function setInterval_(interval, btnEl) {
   if (currentSymbol) loadChart(currentSymbol.code, currentSymbol.name);
 }
 
+let hogaTimer = null;
+
+function toggleHoga() {
+  const on = document.getElementById('hoga-toggle').checked;
+  document.getElementById('hoga-panel').style.display = on ? 'block' : 'none';
+  chart.applyOptions({ width: document.getElementById('chart').clientWidth });
+  if (hogaTimer) { clearInterval(hogaTimer); hogaTimer = null; }
+  if (on) {
+    fetchHoga();
+    hogaTimer = setInterval(fetchHoga, 2000);
+  }
+}
+
+async function fetchHoga() {
+  if (!currentSymbol || !document.getElementById('hoga-toggle').checked) return;
+  try {
+    const res = await fetch(`/api/hoga/${currentSymbol.code}`);
+    renderHoga(await res.json());
+  } catch {
+    document.getElementById('hoga-body').innerHTML =
+      '<tr><td colspan="3" class="muted" style="padding:8px;">조회 실패</td></tr>';
+  }
+}
+
+function renderHoga(data) {
+  const body = document.getElementById('hoga-body');
+  if (data.error) {
+    body.innerHTML = `<tr><td colspan="3" class="muted" style="padding:8px; font-size:11px;">KIS 연동 필요/실패: ${data.error}</td></tr>`;
+    return;
+  }
+  if (!data.rows) {
+    body.innerHTML = `<tr><td colspan="3" class="muted" style="padding:8px; font-size:10px;">응답 형식이 예상과 달라요. 이 내용을 캡처해서 보여주세요:<br><pre style="white-space:pre-wrap;">${JSON.stringify(data.raw)}</pre></td></tr>`;
+    return;
+  }
+  const asks = [...data.rows].reverse();
+  let html = asks.map(r => `
+    <tr><td class="ask-side">${r.ask_qty.toLocaleString()}</td><td class="hoga-price">${r.ask_price.toLocaleString()}</td><td></td></tr>`
+  ).join('');
+  html += data.rows.map(r => `
+    <tr><td></td><td class="hoga-price">${r.bid_price.toLocaleString()}</td><td class="bid-side">${r.bid_qty.toLocaleString()}</td></tr>`
+  ).join('');
+  body.innerHTML = html;
+}
+
 async function loadChart(code, name) {
   currentSymbol = { code, name };
   document.getElementById('chart-title').textContent = `${name} (${code})`;
   highlightActiveWatch();
+  if (document.getElementById('hoga-toggle').checked) fetchHoga();
   const res = await fetch(`/api/chart/${code}?interval=${currentInterval}`);
   if (!res.ok) {
     document.getElementById('price-now').textContent = '';

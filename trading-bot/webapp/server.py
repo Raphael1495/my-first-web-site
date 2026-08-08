@@ -102,6 +102,35 @@ def quote(code: str):
     return {"code": code, "price": float(last["Close"]), "diff": diff, "pct": round(pct, 2)}
 
 
+@app.get("/api/hoga/{code}")
+def hoga(code: str):
+    """KIS 호가 스냅샷을 폴링용으로 정리해서 준다. KIS 미설정/실패 시에도 502 대신
+    빈 rows를 줘서 프론트가 '연동 필요' 안내를 보여줄 수 있게 한다."""
+    try:
+        from broker.kis import KISBroker
+
+        broker = KISBroker(CONFIG)
+        raw = broker.get_hoga(code)
+    except Exception as e:
+        return {"rows": None, "raw": None, "error": str(e)}
+
+    try:
+        rows = [
+            {
+                "level": i,
+                "ask_price": float(raw[f"askp{i}"]),
+                "ask_qty": int(raw[f"askp_rsqn{i}"]),
+                "bid_price": float(raw[f"bidp{i}"]),
+                "bid_qty": int(raw[f"bidp_rsqn{i}"]),
+            }
+            for i in range(1, 11)
+        ]
+        return {"rows": rows, "raw": None, "error": None}
+    except (KeyError, ValueError):
+        # tr_id 응답 필드명이 예상과 다를 수 있음 - 원본을 그대로 내려서 디버깅에 쓴다.
+        return {"rows": None, "raw": raw, "error": None}
+
+
 class WatchlistItem(BaseModel):
     code: str
     name: str

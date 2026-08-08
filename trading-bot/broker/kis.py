@@ -1,11 +1,10 @@
 """한국투자증권(KIS Developers) REST API 어댑터.
 
-⚠️ 중요: 아래 tr_id / 엔드포인트 값은 공개적으로 널리 알려진 값을 기반으로 작성했지만,
-KIS Developers 포털(https://apiportal.koreainvestment.com)에서 최신 문서와
-반드시 대조 확인한 뒤 사용해야 한다. 특히 실전투자 주문을 실행하기 전에는
-모의투자(KIS_IS_PAPER=true) 계좌로 충분히 검증할 것.
-
-해외주식 주문은 아직 구현하지 않았다 (place_order_overseas 참고, tr_id 확인 후 추가 필요).
+⚠️ 중요: 아래 tr_id / 엔드포인트 값은 공개적으로 널리 알려진 값을 기반으로 작성했다.
+국내주식 시세조회/잔고조회/주문(TR_ID_PRICE, TR_ID_BALANCE, TR_ID_ORDER)은 실제 모의투자
+계좌로 이미 검증 완료했다 (2026-08). 반면 TR_ID_HOGA(호가)와 해외주식 주문
+(TR_ID_OVERSEAS_ORDER, place_order_overseas)은 아직 실제로 테스트해본 적이 없으니,
+사용 전 KIS Developers 포털에서 최신 문서와 대조 확인하고 모의투자로 먼저 검증할 것.
 """
 
 import time
@@ -18,12 +17,17 @@ from config import Config
 REAL_BASE_URL = "https://openapi.koreainvestment.com:9443"
 PAPER_BASE_URL = "https://openapivts.koreainvestment.com:29443"
 
-TR_ID_PRICE = "FHKST01010100"
-TR_ID_BALANCE = {"real": "TTC8434R", "paper": "VTTC8434R"}
+TR_ID_PRICE = "FHKST01010100"  # 검증됨
+TR_ID_HOGA = "FHKST01010200"  # 미검증 (국내주식 현재가 호가/예상체결)
+TR_ID_BALANCE = {"real": "TTC8434R", "paper": "VTTC8434R"}  # 검증됨
 TR_ID_ORDER = {
     "real": {"buy": "TTC0802U", "sell": "TTC0801U"},
     "paper": {"buy": "VTTC0802U", "sell": "VTTC0801U"},
-}
+}  # 검증됨
+TR_ID_OVERSEAS_ORDER = {
+    "real": {"buy": "JTTT1002U", "sell": "JTTT1006U"},
+    "paper": {"buy": "VTTT1002U", "sell": "VTTT1001U"},
+}  # 미검증
 
 
 class KISBroker(Broker):
@@ -79,6 +83,17 @@ class KISBroker(Broker):
         resp.raise_for_status()
         return float(resp.json()["output"]["stck_prpr"])
 
+    def get_hoga(self, symbol: str) -> dict:
+        """국내주식 매수/매도 10호가 스냅샷 (실시간 아님, 호출 시점 기준 조회)."""
+        resp = requests.get(
+            f"{self.base_url}/uapi/domestic-stock/v1/quotations/inquire-asking-price-exp-ccn",
+            headers=self._headers(TR_ID_HOGA),
+            params={"FID_COND_MRKT_DIV_CODE": "J", "FID_INPUT_ISCD": symbol},
+            timeout=10,
+        )
+        resp.raise_for_status()
+        return resp.json()["output1"]
+
     def get_balance(self) -> dict:
         cano, prdt_cd = self.config.kis_account_no.split("-")
         resp = requests.get(
@@ -129,8 +144,26 @@ class KISBroker(Broker):
         resp.raise_for_status()
         return resp.json()
 
-    def place_order_overseas(self, *args, **kwargs):
-        raise NotImplementedError(
-            "해외주식 주문은 아직 구현되지 않았습니다. KIS Developers 문서에서 "
-            "해외주식 주문 tr_id/엔드포인트를 확인한 뒤 구현하세요."
+    def place_order_overseas(self, symbol: str, side: str, shares: int, price: float, exchange: str = "NASD") -> dict:
+        """해외주식 주문. ⚠️ 미검증 — 모의투자로 먼저 확인할 것.
+        해외는 국내와 달리 지정가 주문이 기본이라 price(주문 단가)가 필요하다.
+        exchange 예: NASD(나스닥), NYSE(뉴욕), AMEX(아멕스)."""
+        if side not in ("buy", "sell"):
+            raise ValueError("side must be 'buy' or 'sell'")
+        cano, prdt_cd = self.config.kis_account_no.split("-")
+        resp = requests.post(
+            f"{self.base_url}/uapi/overseas-stock/v1/trading/order",
+            headers=self._headers(TR_ID_OVERSEAS_ORDER[self.mode][side]),
+            json={
+                "CANO": cano,
+                "ACNT_PRDT_CD": prdt_cd,
+                "OVRS_EXCG_CD": exchange,
+                "PDNO": symbol,
+                "ORD_QTY": str(shares),
+                "OVRS_ORD_UNPR": str(price),
+                "ORD_SVR_DVSN_CD": "0",
+            },
+            timeout=10,
         )
+        resp.raise_for_status()
+        return resp.json()
