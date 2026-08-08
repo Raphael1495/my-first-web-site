@@ -119,7 +119,7 @@
       <button id="add-watch-btn" onclick="addCurrentToWatchlist()">☆ 관심종목에 추가</button>
       <button class="btn-buy" onclick="openOrderModal('buy')">매수</button>
       <button class="btn-sell" onclick="openOrderModal('sell')">매도</button>
-      <span class="muted">(아직 실제 주문 연동 전이라 매매일지에 기록만 됩니다)</span>
+      <span class="muted">(국내주식만 KIS 연동 지원, 해외주식은 매매일지 기록만 됩니다)</span>
     </div>
     <div class="tf-toolbar">
       <button class="tf-btn active" data-interval="1d" onclick="setInterval_('1d', this)">일봉</button>
@@ -171,7 +171,7 @@
         <button class="primary" onclick="addTrade()">기록 추가</button>
       </div>
       <table>
-        <thead><tr><th>일시</th><th>코드</th><th>이름</th><th>구분</th><th>수량</th><th>가격</th><th>메모</th></tr></thead>
+        <thead><tr><th>일시</th><th>코드</th><th>이름</th><th>구분</th><th>수량</th><th>등락률</th><th>가격</th><th>메모</th></tr></thead>
         <tbody id="journal-body"></tbody>
       </table>
     </div>
@@ -204,9 +204,12 @@
       <input id="o-price" type="number" placeholder="가격" />
       <input id="o-note" placeholder="메모 (선택)" />
     </div>
+    <label style="display:flex; align-items:center; gap:6px; margin-top:10px; font-size:13px;">
+      <input type="checkbox" id="o-real-order" checked /> KIS 계좌에도 실제 주문 전송 (국내주식만)
+    </label>
     <div style="display:flex; gap:8px; justify-content:flex-end; margin-top:14px;">
       <button onclick="closeOrderModal()">취소</button>
-      <button class="primary" onclick="submitOrder()">매매일지에 기록</button>
+      <button class="primary" onclick="submitOrder()">주문/기록</button>
     </div>
   </div>
 </div>
@@ -469,12 +472,19 @@ async function refreshHoldings() {
 async function refreshJournal() {
   const res = await fetch('/api/trades');
   const items = await res.json();
-  document.getElementById('journal-body').innerHTML = items.map(i => `
+  document.getElementById('journal-body').innerHTML = items.map(i => {
+    const pctCell = i.pct_change == null
+      ? '<span class="muted">-</span>'
+      : `<span class="${i.pct_change >= 0 ? 'buy' : 'sell'}">${i.pct_change >= 0 ? '+' : ''}${i.pct_change}%</span>`;
+    const priceCell = `${Math.round(i.price).toLocaleString()}` +
+      (i.buy_avg_price ? `<br><span class="muted" style="font-size:11px;">매수 ${Math.round(i.buy_avg_price).toLocaleString()}</span>` : '');
+    return `
     <tr>
       <td>${i.traded_at.slice(0,16).replace('T',' ')}</td><td>${i.code}</td><td>${i.name}</td>
       <td class="${i.side}">${i.side === 'buy' ? '매수' : '매도'}</td>
-      <td>${i.shares}</td><td>${Math.round(i.price).toLocaleString()}</td><td>${i.note || ''}</td>
-    </tr>`).join('') || '<tr><td colspan="7" class="muted">매매 기록이 없습니다.</td></tr>';
+      <td>${i.shares}</td><td>${pctCell}</td><td>${priceCell}</td><td>${i.note || ''}</td>
+    </tr>`;
+  }).join('') || '<tr><td colspan="8" class="muted">매매 기록이 없습니다.</td></tr>';
   refreshPnlSummary();
 }
 
@@ -521,6 +531,7 @@ function openOrderModal(side) {
   document.getElementById('o-price').value =
     currentChartData.length ? Math.round(currentChartData[currentChartData.length - 1].close) : '';
   document.getElementById('o-note').value = '';
+  document.getElementById('o-real-order').checked = true;
   document.getElementById('order-modal').style.display = 'flex';
 }
 
@@ -532,16 +543,28 @@ async function submitOrder() {
   const shares = parseInt(document.getElementById('o-shares').value, 10);
   const price = parseFloat(document.getElementById('o-price').value);
   if (!shares || !price) { alert('수량/가격을 입력하세요.'); return; }
-  await fetch('/api/trades', {
+  const placeReal = document.getElementById('o-real-order').checked;
+  const res = await fetch('/api/order', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       code: currentSymbol.code, name: currentSymbol.name, side: orderSide,
       shares, price, note: document.getElementById('o-note').value.trim(),
+      place_real_order: placeReal,
     }),
   });
+  const data = await res.json();
   closeOrderModal();
   refreshJournal();
   refreshHoldings();
+
+  if (placeReal) {
+    if (data.broker_error) {
+      alert(`매매일지엔 기록됐지만, KIS 주문은 실패했어요:\n${data.broker_error}`);
+    } else if (data.broker_result) {
+      const msg = data.broker_result.msg1 || JSON.stringify(data.broker_result);
+      alert(`KIS 주문 응답: ${msg}`);
+    }
+  }
 }
 
 let btChart, btSeries;

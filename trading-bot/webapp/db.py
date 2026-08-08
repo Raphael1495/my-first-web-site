@@ -123,6 +123,30 @@ def list_trades() -> list:
     return [dict(r) for r in rows]
 
 
+def list_trades_with_pnl() -> list:
+    """매매일지 표시용: 매도 행에는 그 시점 매수평단가와 등락률을 같이 계산해 붙여준다."""
+    trades = sorted(list_trades(), key=lambda t: t["traded_at"])
+    positions: dict[str, dict] = {}
+    enriched = []
+    for t in trades:
+        pos = positions.setdefault(t["code"], {"shares": 0, "avg_price": 0.0})
+        row = dict(t)
+        if t["side"] == "buy":
+            total_cost = pos["avg_price"] * pos["shares"] + t["price"] * t["shares"]
+            pos["shares"] += t["shares"]
+            pos["avg_price"] = total_cost / pos["shares"] if pos["shares"] > 0 else 0.0
+            row["buy_avg_price"] = None
+            row["pct_change"] = None
+        else:
+            buy_avg = pos["avg_price"]
+            row["buy_avg_price"] = buy_avg if buy_avg else None
+            row["pct_change"] = round((t["price"] - buy_avg) / buy_avg * 100, 2) if buy_avg else None
+            pos["shares"] -= t["shares"]
+        enriched.append(row)
+    enriched.reverse()  # 최신순으로
+    return enriched
+
+
 def compute_holdings() -> list:
     """매매일지에서 매수/매도를 순차 정산해 현재 보유 수량·평단가를 계산한다."""
     trades = sorted(list_trades(), key=lambda t: t["traded_at"])

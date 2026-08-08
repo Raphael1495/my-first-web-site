@@ -8,7 +8,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from backtest.engine import run_backtest as run_backtest_engine
-from config import Config, RiskLimits, StrategyParams
+from config import CONFIG, Config, RiskLimits, StrategyParams
 from data.loader import load_history
 
 from . import db
@@ -160,7 +160,7 @@ class TradeItem(BaseModel):
 
 @app.get("/api/trades")
 def get_trades():
-    return db.list_trades()
+    return db.list_trades_with_pnl()
 
 
 @app.post("/api/trades")
@@ -169,6 +169,32 @@ def post_trades(item: TradeItem):
         raise HTTPException(status_code=400, detail="side must be 'buy' or 'sell'")
     db.add_trade(item.code, item.name, item.side, item.shares, item.price, item.note)
     return {"ok": True}
+
+
+class OrderRequest(TradeItem):
+    place_real_order: bool = True
+
+
+@app.post("/api/order")
+def place_order_api(req: OrderRequest):
+    """매매일지에 기록하고, 요청하면 KIS 모의/실전 계좌에도 실제로 주문을 낸다.
+    KIS 키가 없거나 주문이 실패해도 매매일지 기록 자체는 항상 남긴다."""
+    if req.side not in ("buy", "sell"):
+        raise HTTPException(status_code=400, detail="side must be 'buy' or 'sell'")
+
+    broker_result = None
+    broker_error = None
+    if req.place_real_order:
+        try:
+            from broker.kis import KISBroker  # .env/자격증명 없이도 대시보드가 뜨도록 지연 임포트
+
+            broker = KISBroker(CONFIG)
+            broker_result = broker.place_order(req.code, req.side, req.shares)
+        except Exception as e:
+            broker_error = str(e)
+
+    db.add_trade(req.code, req.name, req.side, req.shares, req.price, req.note)
+    return {"ok": True, "broker_result": broker_result, "broker_error": broker_error}
 
 
 @app.get("/api/holdings")
