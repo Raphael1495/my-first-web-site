@@ -269,6 +269,7 @@ function setMarket(market, btnEl) {
   searchInput.placeholder = market === 'overseas' ? '해외 티커 검색 (예: AAPL, Apple)' : '종목명 또는 코드 검색';
   searchInput.value = '';
   searchResults.style.display = 'none';
+  saveSettings();
 }
 
 function initChart() {
@@ -334,6 +335,7 @@ function updateIndicators() {
     bbSeries.upper.setData([]);
     bbSeries.lower.setData([]);
   }
+  saveSettings();
 }
 
 function setInterval_(interval, btnEl) {
@@ -345,7 +347,8 @@ function setInterval_(interval, btnEl) {
   } else {
     document.getElementById('minute-select').value = interval;
   }
-  if (currentSymbol) loadChart(currentSymbol.code, currentSymbol.name);
+  if (currentSymbol) loadChart(currentSymbol.code, currentSymbol.name, currentSymbol.market, currentSymbol.exchange);
+  saveSettings();
 }
 
 let hogaTimer = null;
@@ -359,6 +362,7 @@ function toggleHoga() {
     fetchHoga();
     hogaTimer = setInterval(fetchHoga, 2000);
   }
+  saveSettings();
 }
 
 async function fetchHoga() {
@@ -397,6 +401,7 @@ async function loadChart(code, name, market, exchange) {
   document.getElementById('chart-title').textContent = `${name} (${code})`;
   highlightActiveWatch();
   updateWatchBtnLabel();
+  saveSettings();
 
   const hogaToggle = document.getElementById('hoga-toggle');
   hogaToggle.disabled = currentSymbol.market === 'overseas';
@@ -433,34 +438,52 @@ const searchInput = document.getElementById('search-input');
 const searchResults = document.getElementById('search-results');
 let searchTimer;
 let searchItems = [];
+function renderSearchResults(items) {
+  searchItems = items;
+  searchResults.innerHTML = items.map(i => {
+    const tag = currentMarket === 'overseas' ? i.exchange : i.market;
+    return `<div onclick="selectSymbol('${i.code}', '${i.name}', '${currentMarket}', '${i.exchange || ''}')">${i.name} (${i.code}) · ${tag}</div>`;
+  }).join('') || '<div class="muted">검색 결과 없음</div>';
+  searchResults.style.display = 'block';
+}
+async function fetchSearchResults(q) {
+  const res = await fetch(`/api/search?q=${encodeURIComponent(q)}&market=${currentMarket}`);
+  return res.json();
+}
 searchInput.addEventListener('input', () => {
   clearTimeout(searchTimer);
   const q = searchInput.value.trim();
   if (!q) { searchResults.style.display = 'none'; searchItems = []; return; }
   searchTimer = setTimeout(async () => {
-    const res = await fetch(`/api/search?q=${encodeURIComponent(q)}&market=${currentMarket}`);
-    const items = await res.json();
-    searchItems = items;
-    searchResults.innerHTML = items.map(i => {
-      const tag = currentMarket === 'overseas' ? i.exchange : i.market;
-      return `<div onclick="selectSymbol('${i.code}', '${i.name}', '${currentMarket}', '${i.exchange || ''}')">${i.name} (${i.code}) · ${tag}</div>`;
-    }).join('') || '<div class="muted">검색 결과 없음</div>';
-    searchResults.style.display = 'block';
+    renderSearchResults(await fetchSearchResults(q));
   }, 250);
 });
 searchInput.addEventListener('keydown', (e) => {
   if (e.key !== 'Tab' && e.key !== 'Enter') return;
-  if (searchItems.length) {
-    e.preventDefault();
-    const i = searchItems[0];
-    selectSymbol(i.code, i.name, currentMarket, i.exchange || '');
-    if (e.key === 'Enter') addCurrentToWatchlist();
+  const q = searchInput.value.trim();
+  if (!q) {
+    // Tab으로 이미 선택해둔 상태(검색창 비어있음)에서 Enter만 누르면 관심종목에 저장
+    if (e.key === 'Enter' && currentSymbol) {
+      e.preventDefault();
+      addCurrentToWatchlist();
+    }
     return;
   }
-  // Tab으로 이미 선택해둔 상태(검색창 비어있음)에서 Enter만 누르면 관심종목에 저장
-  if (e.key === 'Enter' && currentSymbol) {
-    e.preventDefault();
-    addCurrentToWatchlist();
+  // 검색 직후 디바운스(250ms)가 아직 안 끝났을 수 있으므로, preventDefault는
+  // 항상 동기적으로 먼저 호출해서 Tab 포커스 이동/기본 동작을 막아둔다.
+  e.preventDefault();
+  const isEnter = e.key === 'Enter';
+  const finish = (items) => {
+    if (!items.length) return;
+    const i = items[0];
+    selectSymbol(i.code, i.name, currentMarket, i.exchange || '');
+    if (isEnter) addCurrentToWatchlist();
+  };
+  if (searchItems.length) {
+    finish(searchItems);
+  } else {
+    clearTimeout(searchTimer);
+    fetchSearchResults(q).then(finish);
   }
 });
 document.addEventListener('keydown', (e) => {
@@ -766,7 +789,61 @@ async function runBacktest() {
     </tr>`).join('') || '<tr><td colspan="8" class="muted">거래 없음</td></tr>';
 }
 
+const SETTINGS_KEY = 'dashboardSettings';
+let restoringSettings = false;
+
+function saveSettings() {
+  if (restoringSettings) return;
+  localStorage.setItem(SETTINGS_KEY, JSON.stringify({
+    market: currentMarket,
+    interval: currentInterval,
+    indicators: {
+      ma5: document.getElementById('ma5-toggle').checked,
+      ma20: document.getElementById('ma20-toggle').checked,
+      ma60: document.getElementById('ma60-toggle').checked,
+      ma120: document.getElementById('ma120-toggle').checked,
+      bb: document.getElementById('bb-toggle').checked,
+    },
+    hoga: document.getElementById('hoga-toggle').checked,
+    lastSymbol: currentSymbol,
+  }));
+}
+
+async function restoreSettings() {
+  let s;
+  try { s = JSON.parse(localStorage.getItem(SETTINGS_KEY) || 'null'); } catch { s = null; }
+  if (!s) return;
+  restoringSettings = true;
+  try {
+    if (s.indicators) {
+      for (const [key, val] of Object.entries(s.indicators)) {
+        const el = document.getElementById(key + '-toggle');
+        if (el) el.checked = val;
+      }
+    }
+    if (s.market && s.market !== currentMarket) {
+      const btn = document.querySelector(`.market-btn[data-market="${s.market}"]`);
+      if (btn) setMarket(s.market, btn);
+    }
+    if (s.interval) {
+      const btn = document.querySelector(`.tf-btn[data-interval="${s.interval}"]`);
+      setInterval_(s.interval, btn || null);
+    }
+    if (s.lastSymbol) {
+      await loadChart(s.lastSymbol.code, s.lastSymbol.name, s.lastSymbol.market, s.lastSymbol.exchange);
+    }
+    if (s.hoga && currentSymbol && currentSymbol.market !== 'overseas') {
+      document.getElementById('hoga-toggle').checked = true;
+      toggleHoga();
+    }
+  } finally {
+    restoringSettings = false;
+  }
+  saveSettings();
+}
+
 initChart();
+restoreSettings();
 refreshGroups().then(refreshWatchlist);
 refreshHoldings();
 refreshJournal();
