@@ -396,6 +396,7 @@ async function loadChart(code, name, market, exchange) {
   currentSymbol = { code, name, market: market || 'domestic', exchange: exchange || 'NASD' };
   document.getElementById('chart-title').textContent = `${name} (${code})`;
   highlightActiveWatch();
+  updateWatchBtnLabel();
 
   const hogaToggle = document.getElementById('hoga-toggle');
   hogaToggle.disabled = currentSymbol.market === 'overseas';
@@ -431,19 +432,29 @@ async function loadChart(code, name, market, exchange) {
 const searchInput = document.getElementById('search-input');
 const searchResults = document.getElementById('search-results');
 let searchTimer;
+let searchItems = [];
 searchInput.addEventListener('input', () => {
   clearTimeout(searchTimer);
   const q = searchInput.value.trim();
-  if (!q) { searchResults.style.display = 'none'; return; }
+  if (!q) { searchResults.style.display = 'none'; searchItems = []; return; }
   searchTimer = setTimeout(async () => {
     const res = await fetch(`/api/search?q=${encodeURIComponent(q)}&market=${currentMarket}`);
     const items = await res.json();
+    searchItems = items;
     searchResults.innerHTML = items.map(i => {
       const tag = currentMarket === 'overseas' ? i.exchange : i.market;
       return `<div onclick="selectSymbol('${i.code}', '${i.name}', '${currentMarket}', '${i.exchange || ''}')">${i.name} (${i.code}) · ${tag}</div>`;
     }).join('') || '<div class="muted">검색 결과 없음</div>';
     searchResults.style.display = 'block';
   }, 250);
+});
+searchInput.addEventListener('keydown', (e) => {
+  if (e.key !== 'Tab' && e.key !== 'Enter') return;
+  if (!searchItems.length) return;
+  e.preventDefault();
+  const i = searchItems[0];
+  selectSymbol(i.code, i.name, currentMarket, i.exchange || '');
+  if (e.key === 'Enter') addCurrentToWatchlist();
 });
 document.addEventListener('click', (e) => {
   if (!e.target.closest('.search-box')) searchResults.style.display = 'none';
@@ -452,6 +463,7 @@ document.addEventListener('click', (e) => {
 function selectSymbol(code, name, market, exchange) {
   searchInput.value = '';
   searchResults.style.display = 'none';
+  searchItems = [];
   loadChart(code, name, market, exchange);
 }
 
@@ -468,6 +480,11 @@ function highlightActiveWatch() {
   document.querySelectorAll('.watch-item').forEach(el => {
     el.classList.toggle('active', currentSymbol && el.dataset.code === currentSymbol.code);
   });
+}
+
+function updateWatchBtnLabel() {
+  document.getElementById('add-watch-btn').textContent =
+    currentSymbol && watchlistCache.some(w => w.code === currentSymbol.code) ? '★ 관심종목에서 제거' : '☆ 관심종목에 추가';
 }
 
 async function refreshGroups() {
@@ -521,8 +538,7 @@ async function refreshWatchlist() {
     }).join('');
   }
   highlightActiveWatch();
-  document.getElementById('add-watch-btn').textContent =
-    currentSymbol && watchlistCache.some(w => w.code === currentSymbol.code) ? '★ 관심종목에서 제거' : '☆ 관심종목에 추가';
+  updateWatchBtnLabel();
   loadWatchPrices();
 }
 
