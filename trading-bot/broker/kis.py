@@ -2,9 +2,10 @@
 
 ⚠️ 중요: 아래 tr_id / 엔드포인트 값은 공개적으로 널리 알려진 값을 기반으로 작성했다.
 국내주식 시세조회/잔고조회/주문(TR_ID_PRICE, TR_ID_BALANCE, TR_ID_ORDER)은 실제 모의투자
-계좌로 이미 검증 완료했다 (2026-08). 반면 TR_ID_HOGA(호가)와 해외주식 주문
-(TR_ID_OVERSEAS_ORDER, place_order_overseas)은 아직 실제로 테스트해본 적이 없으니,
-사용 전 KIS Developers 포털에서 최신 문서와 대조 확인하고 모의투자로 먼저 검증할 것.
+계좌로 이미 검증 완료했다 (2026-08). 반면 TR_ID_HOGA(호가)와 해외주식 관련 기능
+(TR_ID_OVERSEAS_ORDER/place_order_overseas, TR_ID_OVERSEAS_BALANCE/get_balance_overseas)은
+아직 실제로 테스트해본 적이 없으니, 사용 전 KIS Developers 포털에서 최신 문서와 대조
+확인하고 모의투자로 먼저 검증할 것.
 """
 
 import time
@@ -28,6 +29,7 @@ TR_ID_OVERSEAS_ORDER = {
     "real": {"buy": "JTTT1002U", "sell": "JTTT1006U"},
     "paper": {"buy": "VTTT1002U", "sell": "VTTT1001U"},
 }  # 미검증
+TR_ID_OVERSEAS_BALANCE = {"real": "TTTS3012R", "paper": "VTTS3012R"}  # 미검증
 
 
 class KISBroker(Broker):
@@ -143,6 +145,39 @@ class KISBroker(Broker):
         )
         resp.raise_for_status()
         return resp.json()
+
+    def get_balance_overseas(self, exchange: str = "NASD", currency: str = "USD") -> dict:
+        """해외주식 잔고조회 (예수금 + 보유종목). ⚠️ 미검증 — 모의투자로 먼저 확인할 것.
+        거래소(exchange)별로 따로 조회해야 한다 (국내처럼 통합조회가 아님)."""
+        cano, prdt_cd = self.config.kis_account_no.split("-")
+        resp = requests.get(
+            f"{self.base_url}/uapi/overseas-stock/v1/trading/inquire-balance",
+            headers=self._headers(TR_ID_OVERSEAS_BALANCE[self.mode]),
+            params={
+                "CANO": cano,
+                "ACNT_PRDT_CD": prdt_cd,
+                "OVRS_EXCG_CD": exchange,
+                "TR_CRCY_CD": currency,
+                "CTX_AREA_FK200": "",
+                "CTX_AREA_NK200": "",
+            },
+            timeout=10,
+        )
+        resp.raise_for_status()
+        body = resp.json()
+        positions = {
+            item["ovrs_pdno"]: {
+                "shares": int(float(item["ovrs_cblc_qty"])),
+                "avg_price": float(item["pchs_avg_pric"]),
+            }
+            for item in body.get("output1", [])
+            if float(item.get("ovrs_cblc_qty", 0)) > 0
+        }
+        output2 = body.get("output2") or {}
+        if isinstance(output2, list):  # 응답 형태가 리스트로 올 수도 있어 방어적으로 처리
+            output2 = output2[0] if output2 else {}
+        cash = float(output2.get("frcr_dncl_amt_2", 0) or 0)
+        return {"cash": cash, "positions": positions}
 
     def place_order_overseas(self, symbol: str, side: str, shares: int, price: float, exchange: str = "NASD") -> dict:
         """해외주식 주문. ⚠️ 미검증 — 모의투자로 먼저 확인할 것.

@@ -47,10 +47,16 @@
   .price-header .change.down { color: #3169d6; }
   .price-sub { color: #888; font-size: 13px; margin-bottom: 12px; }
   #chart { border: 1px solid #e2e4e9; border-radius: 8px; overflow: hidden; background: #fff; }
+  .journal-scroll { max-height: 528px; overflow-y: auto; }
+  .journal-scroll thead th { position: sticky; top: 0; background: #fff; }
 
-  .tabs { display: flex; gap: 4px; margin: 24px 0 12px; border-bottom: 1px solid #e2e4e9; }
-  .tab { padding: 8px 16px; cursor: pointer; font-size: 14px; color: #888; border-bottom: 2px solid transparent; }
-  .tab.active { color: #1a1a1a; border-color: #3169d6; font-weight: 600; }
+  .tabs-panels-row { display: flex; gap: 20px; align-items: flex-start; margin-top: 24px; }
+  .tabs-col { flex: 0 0 10%; max-width: 10%; }
+  .panels-col { flex: 1 1 0; min-width: 0; }
+  .tabs { display: flex; flex-direction: column; gap: 2px; margin: 0 0 16px; }
+  .tab { padding: 10px 12px; cursor: pointer; font-size: 14px; color: #888; border-left: 2px solid transparent; border-radius: 0 6px 6px 0; }
+  .tab.active { color: #1a1a1a; border-color: #3169d6; background: #eaf1ff; font-weight: 600; }
+  .tabs-col .pnl-summary { flex-direction: column; gap: 14px; }
   .panel { display: none; }
   .panel.active { display: block; }
   table { width: 100%; border-collapse: collapse; font-size: 13px; background: #fff; }
@@ -175,53 +181,61 @@
       </div>
     </div>
 
-    <div class="tabs">
-      <div class="tab active" data-panel="holdings">보유종목</div>
-      <div class="tab" data-panel="journal">매매일지</div>
-      <div class="tab" data-panel="backtest">백테스트</div>
-    </div>
-
-    <div id="panel-holdings" class="panel active">
-      <table>
-        <thead><tr><th>코드</th><th>이름</th><th>수량</th><th>평단가</th></tr></thead>
-        <tbody id="holdings-body"></tbody>
-      </table>
-      <p class="muted">매매일지에 기록된 매수/매도 내역으로 자동 계산됩니다.</p>
-    </div>
-
-    <div id="panel-journal" class="panel">
-      <div id="pnl-summary" class="pnl-summary"></div>
-      <div class="add-form">
-        <input id="j-code" placeholder="코드" style="width:80px" />
-        <input id="j-name" placeholder="이름" style="width:100px" />
-        <select id="j-side"><option value="buy">매수</option><option value="sell">매도</option></select>
-        <input id="j-shares" placeholder="수량" type="number" style="width:80px" />
-        <input id="j-price" placeholder="가격" type="number" style="width:100px" />
-        <input id="j-note" placeholder="메모 (선택)" style="width:160px" />
-        <button class="primary" onclick="addTrade()">기록 추가</button>
+    <div class="tabs-panels-row">
+      <div class="tabs-col">
+        <div class="tabs">
+          <div class="tab active" data-panel="holdings">보유종목</div>
+          <div class="tab" data-panel="journal">매매일지</div>
+          <div class="tab" data-panel="backtest">백테스트</div>
+        </div>
+        <div id="pnl-summary" class="pnl-summary"></div>
       </div>
-      <table>
-        <thead><tr><th>일시</th><th>코드</th><th>이름</th><th>구분</th><th>수량</th><th>등락률</th><th>가격</th><th>메모</th></tr></thead>
-        <tbody id="journal-body"></tbody>
-      </table>
-    </div>
 
-    <div id="panel-backtest" class="panel">
-      <div class="bt-form">
-        <input id="bt-symbols" placeholder="종목코드 (쉼표로 구분, 예: 005930,000660)" style="width:260px" />
-        <label>기간 <input id="bt-period" value="3y" style="width:50px" /></label>
-        <label>초기자산 <input id="bt-capital" type="number" value="10000000" style="width:110px" /></label>
-        <label>단기이평 <input id="bt-fast" type="number" value="20" style="width:50px" /></label>
-        <label>장기이평 <input id="bt-slow" type="number" value="60" style="width:50px" /></label>
-        <button class="primary" onclick="runBacktest()">백테스트 실행</button>
+      <div class="panels-col">
+        <div id="panel-holdings" class="panel active">
+          <table>
+            <thead><tr><th>코드</th><th>이름</th><th>수량</th><th>평단가</th></tr></thead>
+            <tbody id="holdings-body"></tbody>
+          </table>
+          <p class="muted">매매일지에 기록된 매수/매도 내역으로 자동 계산됩니다.</p>
+        </div>
+
+        <div id="panel-journal" class="panel">
+          <div class="add-form">
+            <input id="j-code" placeholder="코드" style="width:80px" />
+            <input id="j-name" placeholder="이름" style="width:100px" />
+            <select id="j-side"><option value="buy">매수</option><option value="sell">매도</option></select>
+            <input id="j-shares" placeholder="수량" type="number" style="width:80px" />
+            <input id="j-price" placeholder="가격" type="number" style="width:100px" />
+            <input id="j-note" placeholder="메모 (선택)" style="width:160px" />
+            <button class="primary" onclick="addTrade()">기록 추가</button>
+          </div>
+          <div class="journal-scroll">
+            <table>
+              <thead><tr><th>일시</th><th>코드</th><th>이름</th><th>구분</th><th>수량</th><th>등락률</th><th>가격</th><th>메모</th></tr></thead>
+              <tbody id="journal-body"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div id="panel-backtest" class="panel">
+          <div class="bt-form">
+            <input id="bt-symbols" placeholder="종목코드 (쉼표로 구분, 예: 005930,000660)" style="width:260px" />
+            <label>기간 <input id="bt-period" value="3y" style="width:50px" /></label>
+            <label>초기자산 <input id="bt-capital" type="number" value="10000000" style="width:110px" /></label>
+            <label>단기이평 <input id="bt-fast" type="number" value="20" style="width:50px" /></label>
+            <label>장기이평 <input id="bt-slow" type="number" value="60" style="width:50px" /></label>
+            <button class="primary" onclick="runBacktest()">백테스트 실행</button>
+          </div>
+          <div id="bt-status" class="muted"></div>
+          <div id="bt-metrics" class="pnl-summary" style="display:none;"></div>
+          <div id="backtest-chart" style="display:none; height:280px;"></div>
+          <table id="bt-trades-table" style="display:none;">
+            <thead><tr><th>종목</th><th>진입일</th><th>청산일</th><th>진입가</th><th>청산가</th><th>수량</th><th>손익</th><th>사유</th></tr></thead>
+            <tbody id="bt-trades-body"></tbody>
+          </table>
+        </div>
       </div>
-      <div id="bt-status" class="muted"></div>
-      <div id="bt-metrics" class="pnl-summary" style="display:none;"></div>
-      <div id="backtest-chart" style="display:none; height:280px;"></div>
-      <table id="bt-trades-table" style="display:none;">
-        <thead><tr><th>종목</th><th>진입일</th><th>청산일</th><th>진입가</th><th>청산가</th><th>수량</th><th>손익</th><th>사유</th></tr></thead>
-        <tbody id="bt-trades-body"></tbody>
-      </table>
     </div>
   </main>
 </div>
@@ -276,7 +290,7 @@ function initChart() {
   const el = document.getElementById('chart');
   chart = LightweightCharts.createChart(el, {
     width: el.clientWidth,
-    height: 440,
+    height: 352,
     layout: { background: { color: '#ffffff' }, textColor: '#333' },
     grid: { vertLines: { color: '#f0f1f3' }, horzLines: { color: '#f0f1f3' } },
     timeScale: { borderColor: '#e2e4e9' },
