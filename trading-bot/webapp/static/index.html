@@ -7,58 +7,55 @@
 <style>
   * { box-sizing: border-box; }
   body { font-family: -apple-system, "Malgun Gothic", "Segoe UI", sans-serif; margin: 0; background: #f4f5f7; color: #1a1a1a; }
-  .app { display: flex; height: 100vh; }
+  .page { display: flex; flex-direction: column; height: 100vh; }
 
-  /* 왼쪽 사이드바: 검색 + 관심종목 (HTS 스타일 고정 패널) */
-  .sidebar { width: 280px; flex-shrink: 0; background: #ffffff; border-right: 1px solid #e2e4e9; display: flex; flex-direction: column; }
-  .sidebar h1 { font-size: 15px; margin: 0; padding: 16px; border-bottom: 1px solid #e2e4e9; }
-  .search-box { position: relative; padding: 12px; border-bottom: 1px solid #e2e4e9; }
-  .search-box input { width: 100%; padding: 8px 10px; border-radius: 6px; border: 1px solid #d5d8de; background: #f9fafb; color: #1a1a1a; font-size: 13px; }
-  .search-results { position: absolute; left: 12px; right: 12px; top: 100%; background: #fff; border: 1px solid #d5d8de; border-radius: 6px; box-shadow: 0 4px 10px rgba(0,0,0,.08); max-height: 260px; overflow-y: auto; z-index: 10; }
+  /* 최상단 바: 관심종목(왼쪽) + 검색(오른쪽) */
+  .topbar { display: flex; align-items: center; gap: 16px; padding: 10px 24px; background: #ffffff; border-bottom: 1px solid #e2e4e9; flex-shrink: 0; }
+  .topbar h1 { font-size: 14px; margin: 0; white-space: nowrap; color: #555; }
+  .watchlist-strip { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; overflow-x: auto; }
+  .wl-chip { display: flex; align-items: center; gap: 6px; padding: 6px 10px; border: 1px solid #e2e4e9; border-radius: 999px; cursor: pointer; font-size: 12px; white-space: nowrap; flex-shrink: 0; }
+  .wl-chip:hover { background: #f5f7fa; }
+  .wl-chip.active { background: #eaf1ff; border-color: #3169d6; }
+  .wl-chip .price-col { color: #999; }
+  .wl-chip .price-col.up { color: #d6362f; } .wl-chip .price-col.down { color: #3169d6; }
+  .wl-chip .del { color: #bbb; font-size: 11px; }
+  .wl-chip .del:hover { color: #ff5b5b; }
+  .topbar-search { position: relative; display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+  .add-group-btn { border: none; background: none; color: #3169d6; font-size: 18px; cursor: pointer; padding: 0 4px; line-height: 1; }
+  .market-toggle-inline { display: flex; gap: 4px; }
+  .market-toggle-inline .market-btn { padding: 6px 10px; font-size: 12px; }
+  .search-box { position: relative; }
+  .search-box input { width: 220px; padding: 8px 10px; border-radius: 6px; border: 1px solid #d5d8de; background: #f9fafb; color: #1a1a1a; font-size: 13px; }
+  .search-results { position: absolute; right: 0; top: 100%; width: 260px; background: #fff; border: 1px solid #d5d8de; border-radius: 6px; box-shadow: 0 4px 10px rgba(0,0,0,.08); max-height: 260px; overflow-y: auto; z-index: 10; }
   .search-results div { padding: 8px 10px; cursor: pointer; font-size: 13px; }
   .search-results div:hover { background: #f0f2f5; }
-  .watchlist-header { display: flex; align-items: center; justify-content: space-between; padding: 10px 12px 4px; }
-  .watchlist-header span { font-size: 12px; color: #888; font-weight: 600; }
-  .watchlist-header .add-group-btn { border: none; background: none; color: #3169d6; font-size: 16px; cursor: pointer; padding: 0 4px; line-height: 1; }
-  .watchlist { flex: 1; overflow-y: auto; }
-  .group-block { border-bottom: 1px solid #f0f1f3; }
-  .group-title { display: flex; align-items: center; justify-content: space-between; padding: 8px 12px 4px; font-size: 12px; color: #555; font-weight: 600; }
-  .group-title .del-group { color: #ccc; font-size: 11px; cursor: pointer; }
-  .group-title .del-group:hover { color: #ff5b5b; }
-  .watch-item { display: flex; justify-content: space-between; align-items: center; padding: 9px 12px; cursor: pointer; font-size: 13px; gap: 6px; }
-  .watch-item:hover { background: #f5f7fa; }
-  .watch-item.active { background: #eaf1ff; }
-  .watch-item .name-col { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .watch-item .price-col { font-size: 12px; text-align: right; white-space: nowrap; color: #999; }
-  .watch-item .price-col.up { color: #d6362f; } .watch-item .price-col.down { color: #3169d6; }
-  .watch-item .del { color: #bbb; font-size: 11px; padding: 2px 6px; }
-  .watch-item .del:hover { color: #ff5b5b; }
-  .watchlist .muted { padding: 12px; }
   .indicator-toolbar { display: flex; gap: 14px; align-items: center; margin-bottom: 8px; font-size: 12px; color: #555; flex-wrap: wrap; }
   .indicator-toolbar label { display: flex; align-items: center; gap: 4px; cursor: pointer; }
   .ma5 { color: #e6a23c; } .ma20 { color: #d6362f; } .ma60 { color: #67c23a; } .ma120 { color: #9b59b6; } .bb-label { color: #3169d6; }
 
-  /* 메인 영역 */
-  main { flex: 1; overflow-y: auto; padding: 20px 24px; }
-  .price-header { display: flex; align-items: baseline; gap: 10px; margin-bottom: 4px; }
+  /* 메인 영역: 위쪽에 종목 정보, 아래쪽에 차트+테이블을 고정 */
+  main { flex: 1; min-height: 0; overflow-y: auto; padding: 20px 24px; display: flex; flex-direction: column; }
+  .price-header { display: flex; align-items: baseline; gap: 10px; margin-bottom: 4px; margin-top: 28px; }
   .price-header h2 { font-size: 20px; margin: 0; }
   .price-header .price { font-size: 22px; font-weight: 700; }
   .price-header .change.up { color: #d6362f; }
   .price-header .change.down { color: #3169d6; }
   .price-sub { color: #888; font-size: 13px; margin-bottom: 12px; }
-  #chart { border: 1px solid #e2e4e9; border-radius: 8px; overflow: hidden; background: #fff; }
-  .journal-scroll { max-height: 528px; overflow-y: auto; }
-  .journal-scroll thead th { position: sticky; top: 0; background: #fff; }
+  #chart { border: 1px solid #e2e4e9; border-radius: 8px; overflow: hidden; background: #fff; flex: 1; min-height: 0; }
+  .panel.active thead th { position: sticky; top: 0; background: #fff; }
 
-  .tabs-panels-row { display: flex; gap: 20px; align-items: flex-start; margin-top: 24px; }
-  .tabs-col { flex: 0 0 10%; max-width: 10%; }
-  .panels-col { flex: 1 1 0; min-width: 0; }
-  .tabs { display: flex; flex-direction: column; gap: 2px; margin: 0 0 16px; }
-  .tab { padding: 10px 12px; cursor: pointer; font-size: 14px; color: #888; border-left: 2px solid transparent; border-radius: 0 6px 6px 0; }
-  .tab.active { color: #1a1a1a; border-color: #3169d6; background: #eaf1ff; font-weight: 600; }
-  .tabs-col .pnl-summary { flex-direction: column; gap: 14px; }
+  .dash-row { display: flex; gap: 20px; align-items: stretch; flex: 1; min-height: 0; padding-top: 12px; }
+  .chart-col { flex: 0 0 60%; max-width: 60%; min-width: 0; display: flex; flex-direction: column; min-height: 0; }
+  .side-col { flex: 0 0 40%; max-width: 40%; min-width: 0; display: flex; flex-direction: column; min-height: 0; }
+  /* 차트 쪽 툴바 2줄과 테이블 쪽 탭+요약 박스 높이를 강제로 맞춰서, 차트와 테이블이 같은 높이에서 시작하게 함 */
+  .col-header { flex: 0 0 auto; }
+  .col-header .pnl-summary,
+  .col-header .tabs { margin-bottom: 8px; }
+  .tabs { display: flex; gap: 4px; margin: 0 0 12px; border-bottom: 1px solid #e2e4e9; }
+  .tab { padding: 8px 16px; cursor: pointer; font-size: 14px; color: #888; border-bottom: 2px solid transparent; }
+  .tab.active { color: #1a1a1a; border-color: #3169d6; font-weight: 600; }
   .panel { display: none; }
-  .panel.active { display: block; }
+  .panel.active { display: flex; flex-direction: column; flex: 1; min-height: 0; overflow-y: auto; }
   table { width: 100%; border-collapse: collapse; font-size: 13px; background: #fff; }
   th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid #eef0f3; }
   th { color: #888; font-weight: 500; }
@@ -86,9 +83,11 @@
   .modal-box .add-form { flex-direction: column; }
   .modal-box .add-form input { width: 100%; }
 
-  .pnl-summary { display: flex; gap: 24px; flex-wrap: wrap; background: #fff; border: 1px solid #e2e4e9; border-radius: 8px; padding: 14px 18px; margin-bottom: 16px; }
-  .pnl-stat .label { font-size: 12px; color: #999; margin-bottom: 2px; }
-  .pnl-stat .value { font-size: 17px; font-weight: 700; }
+  .pnl-summary { display: flex; gap: 24px; flex-wrap: nowrap; overflow-x: auto; background: #fff; border: 1px solid #e2e4e9; border-radius: 8px; padding: 14px 18px; margin-bottom: 16px; }
+  .pnl-summary .pnl-by-stock { white-space: nowrap; }
+  .pnl-stat { flex-shrink: 0; }
+  .pnl-stat .label { font-size: 12px; color: #999; margin-bottom: 2px; white-space: nowrap; }
+  .pnl-stat .value { font-size: 17px; font-weight: 700; white-space: nowrap; }
   .pnl-stat .value.up { color: #d6362f; } .pnl-stat .value.down { color: #3169d6; }
   .pnl-by-stock { margin-top: 4px; }
 
@@ -97,40 +96,28 @@
   .bt-form input { padding: 6px 10px; border-radius: 6px; border: 1px solid #d5d8de; background: #f9fafb; font-size: 13px; }
   .bt-form label { font-size: 12px; color: #666; display: flex; align-items: center; gap: 4px; }
 
-  .chart-hoga-row { display: flex; gap: 12px; }
-  .chart-hoga-row #chart { flex: 1; min-width: 0; }
-  #hoga-panel { width: 190px; flex-shrink: 0; border: 1px solid #e2e4e9; border-radius: 8px; background: #fff; overflow: hidden; }
-  #hoga-panel table { font-size: 12px; }
-  #hoga-panel th, #hoga-panel td { padding: 4px 6px; text-align: right; border-bottom: none; }
-  #hoga-panel .hoga-price { text-align: center; font-weight: 600; background: #f7f8fa; }
-  .ask-side { color: #d6362f; } .bid-side { color: #3169d6; }
-  .hoga-note { font-size: 11px; color: #aaa; padding: 6px 8px; border-top: 1px solid #f0f1f3; }
-
-  .market-toggle { display: flex; gap: 6px; padding: 10px 12px 0; }
-  .market-btn { flex: 1; padding: 6px 0; font-size: 12px; text-align: center; }
   .market-btn.active { background: #3169d6; color: #fff; border-color: #3169d6; }
   .exchange-tag { font-size: 10px; color: #999; margin-left: 4px; }
 </style>
 </head>
 <body>
 
-<div class="app">
-  <aside class="sidebar">
-    <h1>주식 자동매매 대시보드</h1>
-    <div class="market-toggle">
-      <button class="market-btn active" data-market="domestic" onclick="setMarket('domestic', this)">국내</button>
-      <button class="market-btn" data-market="overseas" onclick="setMarket('overseas', this)">해외</button>
+<div class="page">
+  <div class="topbar">
+    <h1>주식 자동매매</h1>
+    <div id="watchlist-strip" class="watchlist-strip"></div>
+    <div class="topbar-search">
+      <div class="market-toggle-inline">
+        <button class="market-btn active" data-market="domestic" onclick="setMarket('domestic', this)">국내</button>
+        <button class="market-btn" data-market="overseas" onclick="setMarket('overseas', this)">해외</button>
+      </div>
+      <div class="search-box">
+        <input id="search-input" placeholder="종목명 또는 코드 검색" autocomplete="off" />
+        <div id="search-results" class="search-results" style="display:none;"></div>
+      </div>
+      <button class="add-group-btn" onclick="createGroup()" title="관심종목 그룹 추가">＋</button>
     </div>
-    <div class="search-box">
-      <input id="search-input" placeholder="종목명 또는 코드 검색" autocomplete="off" />
-      <div id="search-results" class="search-results" style="display:none;"></div>
-    </div>
-    <div class="watchlist-header">
-      <span>관심종목</span>
-      <button class="add-group-btn" onclick="createGroup()" title="그룹 추가">＋</button>
-    </div>
-    <div id="watchlist" class="watchlist"></div>
-  </aside>
+  </div>
 
   <main>
     <div class="price-header">
@@ -143,55 +130,48 @@
       <button id="add-watch-btn" onclick="addCurrentToWatchlist()">☆ 관심종목에 추가</button>
       <button class="btn-buy" onclick="openOrderModal('buy')">매수</button>
       <button class="btn-sell" onclick="openOrderModal('sell')">매도</button>
-      <label style="font-size:12px; color:#666; display:flex; align-items:center; gap:4px; margin-left:8px;">
-        <input type="checkbox" id="hoga-toggle" onchange="toggleHoga()" /> 호가창 (폴링, 국내주식만)
-      </label>
       <span class="muted">(국내주식만 KIS 연동 지원, 해외주식은 매매일지 기록만 됩니다)</span>
     </div>
-    <div class="tf-toolbar">
-      <button class="tf-btn active" data-interval="1d" onclick="setInterval_('1d', this)">일봉</button>
-      <button class="tf-btn" data-interval="1wk" onclick="setInterval_('1wk', this)">주봉</button>
-      <button class="tf-btn" data-interval="1mo" onclick="setInterval_('1mo', this)">월봉</button>
-      <select id="minute-select" onchange="setInterval_(this.value, null)">
-        <option value="">분봉 선택</option>
-        <option value="1m">1분</option>
-        <option value="3m">3분</option>
-        <option value="5m">5분</option>
-        <option value="10m">10분</option>
-        <option value="30m">30분</option>
-        <option value="60m">60분</option>
-      </select>
-      <button class="tf-btn" disabled title="KIS API 실시간 연동 후 지원 예정">틱(준비중)</button>
-    </div>
-    <div class="indicator-toolbar">
-      <label><input type="checkbox" id="ma5-toggle" checked onchange="updateIndicators()"><span class="ma5">■</span> 5일선</label>
-      <label><input type="checkbox" id="ma20-toggle" checked onchange="updateIndicators()"><span class="ma20">■</span> 20일선</label>
-      <label><input type="checkbox" id="ma60-toggle" checked onchange="updateIndicators()"><span class="ma60">■</span> 60일선</label>
-      <label><input type="checkbox" id="ma120-toggle" checked onchange="updateIndicators()"><span class="ma120">■</span> 120일선</label>
-      <label><input type="checkbox" id="bb-toggle" checked onchange="updateIndicators()"><span class="bb-label">■</span> 볼린저밴드(20)</label>
-    </div>
-    <div class="chart-hoga-row">
-      <div id="chart"></div>
-      <div id="hoga-panel" style="display:none;">
-        <table>
-          <thead><tr><th>매도잔량</th><th>호가</th><th>매수잔량</th></tr></thead>
-          <tbody id="hoga-body"></tbody>
-        </table>
-        <div class="hoga-note">1~2초 간격 새로고침 (실시간 아님)</div>
-      </div>
-    </div>
 
-    <div class="tabs-panels-row">
-      <div class="tabs-col">
-        <div class="tabs">
-          <div class="tab active" data-panel="holdings">보유종목</div>
-          <div class="tab" data-panel="journal">매매일지</div>
-          <div class="tab" data-panel="backtest">백테스트</div>
+    <div class="dash-row">
+      <div class="chart-col">
+        <div class="col-header">
+          <div class="tf-toolbar">
+            <button class="tf-btn active" data-interval="1d" onclick="setInterval_('1d', this)">일봉</button>
+            <button class="tf-btn" data-interval="1wk" onclick="setInterval_('1wk', this)">주봉</button>
+            <button class="tf-btn" data-interval="1mo" onclick="setInterval_('1mo', this)">월봉</button>
+            <select id="minute-select" onchange="setInterval_(this.value, null)">
+              <option value="">분봉 선택</option>
+              <option value="1m">1분</option>
+              <option value="3m">3분</option>
+              <option value="5m">5분</option>
+              <option value="10m">10분</option>
+              <option value="30m">30분</option>
+              <option value="60m">60분</option>
+            </select>
+            <button class="tf-btn" disabled title="KIS API 실시간 연동 후 지원 예정">틱(준비중)</button>
+          </div>
+          <div class="indicator-toolbar">
+            <label><input type="checkbox" id="ma5-toggle" checked onchange="updateIndicators()"><span class="ma5">■</span> 5일선</label>
+            <label><input type="checkbox" id="ma20-toggle" checked onchange="updateIndicators()"><span class="ma20">■</span> 20일선</label>
+            <label><input type="checkbox" id="ma60-toggle" checked onchange="updateIndicators()"><span class="ma60">■</span> 60일선</label>
+            <label><input type="checkbox" id="ma120-toggle" checked onchange="updateIndicators()"><span class="ma120">■</span> 120일선</label>
+            <label><input type="checkbox" id="bb-toggle" checked onchange="updateIndicators()"><span class="bb-label">■</span> 볼린저밴드(20)</label>
+          </div>
         </div>
-        <div id="pnl-summary" class="pnl-summary"></div>
+        <div id="chart"></div>
       </div>
 
-      <div class="panels-col">
+      <div class="side-col">
+        <div class="col-header">
+          <div class="tabs">
+            <div class="tab active" data-panel="holdings">보유종목</div>
+            <div class="tab" data-panel="journal">매매일지</div>
+            <div class="tab" data-panel="backtest">백테스트</div>
+          </div>
+          <div id="pnl-summary" class="pnl-summary"></div>
+        </div>
+
         <div id="panel-holdings" class="panel active">
           <table>
             <thead><tr><th>코드</th><th>이름</th><th>수량</th><th>평단가</th><th>등락률</th><th>메모</th></tr></thead>
@@ -291,7 +271,7 @@ function initChart() {
   const el = document.getElementById('chart');
   chart = LightweightCharts.createChart(el, {
     width: el.clientWidth,
-    height: 352,
+    height: el.clientHeight,
     layout: { background: { color: '#ffffff' }, textColor: '#333' },
     grid: { vertLines: { color: '#f0f1f3' }, horzLines: { color: '#f0f1f3' } },
     timeScale: { borderColor: '#e2e4e9' },
@@ -301,6 +281,14 @@ function initChart() {
     upColor: '#d6362f', downColor: '#3169d6', borderVisible: false,
     wickUpColor: '#d6362f', wickDownColor: '#3169d6',
   });
+  // 세로축 최솟값을 0원으로 고정 (데이터 최소값 아래로 여백이 안 생기게)
+  series.autoscaleInfoProvider = (original) => {
+    const res = original();
+    if (res !== null) {
+      res.priceRange.minValue = 0;
+    }
+    return res;
+  };
 
   const maColors = { ma5: '#e6a23c', ma20: '#d6362f', ma60: '#67c23a', ma120: '#9b59b6' };
   for (const [key, color] of Object.entries(maColors)) {
@@ -309,7 +297,10 @@ function initChart() {
   bbSeries.upper = chart.addLineSeries({ color: '#3169d6', lineWidth: 1, lineStyle: 2, priceLineVisible: false, lastValueVisible: false });
   bbSeries.lower = chart.addLineSeries({ color: '#3169d6', lineWidth: 1, lineStyle: 2, priceLineVisible: false, lastValueVisible: false });
 
-  window.addEventListener('resize', () => chart.applyOptions({ width: el.clientWidth }));
+  // 창 크기 변경뿐 아니라, 레이아웃(flex) 변화로 컨테이너 크기만 바뀌는 경우도 캔버스가 따라가도록 감지
+  new ResizeObserver(() => {
+    chart.applyOptions({ width: el.clientWidth, height: el.clientHeight });
+  }).observe(el);
 }
 
 function sma(data, period) {
@@ -366,68 +357,12 @@ function setInterval_(interval, btnEl) {
   saveSettings();
 }
 
-let hogaTimer = null;
-
-function toggleHoga() {
-  const on = document.getElementById('hoga-toggle').checked;
-  document.getElementById('hoga-panel').style.display = on ? 'block' : 'none';
-  chart.applyOptions({ width: document.getElementById('chart').clientWidth });
-  if (hogaTimer) { clearInterval(hogaTimer); hogaTimer = null; }
-  if (on) {
-    fetchHoga();
-    hogaTimer = setInterval(fetchHoga, 2000);
-  }
-  saveSettings();
-}
-
-async function fetchHoga() {
-  if (!currentSymbol || !document.getElementById('hoga-toggle').checked) return;
-  try {
-    const res = await fetch(`/api/hoga/${currentSymbol.code}`);
-    renderHoga(await res.json());
-  } catch {
-    document.getElementById('hoga-body').innerHTML =
-      '<tr><td colspan="3" class="muted" style="padding:8px;">조회 실패</td></tr>';
-  }
-}
-
-function renderHoga(data) {
-  const body = document.getElementById('hoga-body');
-  if (data.error) {
-    body.innerHTML = `<tr><td colspan="3" class="muted" style="padding:8px; font-size:11px;">KIS 연동 필요/실패: ${data.error}</td></tr>`;
-    return;
-  }
-  if (!data.rows) {
-    body.innerHTML = `<tr><td colspan="3" class="muted" style="padding:8px; font-size:10px;">응답 형식이 예상과 달라요. 이 내용을 캡처해서 보여주세요:<br><pre style="white-space:pre-wrap;">${JSON.stringify(data.raw)}</pre></td></tr>`;
-    return;
-  }
-  const asks = [...data.rows].reverse();
-  let html = asks.map(r => `
-    <tr><td class="ask-side">${r.ask_qty.toLocaleString()}</td><td class="hoga-price">${r.ask_price.toLocaleString()}</td><td></td></tr>`
-  ).join('');
-  html += data.rows.map(r => `
-    <tr><td></td><td class="hoga-price">${r.bid_price.toLocaleString()}</td><td class="bid-side">${r.bid_qty.toLocaleString()}</td></tr>`
-  ).join('');
-  body.innerHTML = html;
-}
-
 async function loadChart(code, name, market, exchange) {
   currentSymbol = { code, name, market: market || 'domestic', exchange: exchange || 'NASD' };
   document.getElementById('chart-title').textContent = `${name} (${code})`;
   highlightActiveWatch();
   updateWatchBtnLabel();
   saveSettings();
-
-  const hogaToggle = document.getElementById('hoga-toggle');
-  hogaToggle.disabled = currentSymbol.market === 'overseas';
-  if (currentSymbol.market === 'overseas') {
-    if (hogaToggle.checked) { hogaToggle.checked = false; toggleHoga(); }
-  } else if (!hogaToggle.checked) {
-    hogaToggle.checked = true;  // 국내 종목은 항상 오른쪽에 호가창이 보이도록 자동으로 켠다
-    toggleHoga();
-  } else {
-    fetchHoga();
-  }
 
   const res = await fetch(`/api/chart/${code}?interval=${currentInterval}&market=${currentSymbol.market}`);
   if (!res.ok) {
@@ -538,7 +473,7 @@ document.querySelectorAll('.tab').forEach(tab => {
 });
 
 function highlightActiveWatch() {
-  document.querySelectorAll('.watch-item').forEach(el => {
+  document.querySelectorAll('.wl-chip').forEach(el => {
     el.classList.toggle('active', currentSymbol && el.dataset.code === currentSymbol.code);
   });
 }
@@ -578,26 +513,15 @@ async function removeGroup(name) {
 async function refreshWatchlist() {
   const res = await fetch('/api/watchlist');
   watchlistCache = await res.json();
-  const el = document.getElementById('watchlist');
+  const el = document.getElementById('watchlist-strip');
 
-  if (watchlistCache.length === 0 && groupsCache.length <= 1) {
-    el.innerHTML = '<div class="muted">관심종목이 없습니다.<br>종목 검색 후 추가하세요.</div>';
-  } else {
-    const order = groupsCache.map(g => g.name);
-    const byGroup = {};
-    for (const item of watchlistCache) (byGroup[item.group_name] ??= []).push(item);
-    el.innerHTML = order.map(groupName => {
-      const items = byGroup[groupName] || [];
-      const delBtn = groupName === '기본' ? '' : `<span class="del-group" onclick="removeGroup('${groupName}')">그룹삭제</span>`;
-      const rows = items.map(i => `
-        <div class="watch-item" data-code="${i.code}" onclick="loadChart('${i.code}', '${i.name}', '${i.market}', '${i.exchange || ''}')">
-          <span class="name-col">${i.name}${i.market === 'overseas' ? '<span class="exchange-tag">해외</span>' : ''}</span>
-          <span class="price-col" id="wprice-${i.code}">…</span>
-          <span class="del" onclick="event.stopPropagation(); removeWatch('${i.code}')">✕</span>
-        </div>`).join('') || '<div class="muted" style="padding:4px 12px;">비어있음</div>';
-      return `<div class="group-block"><div class="group-title"><span>${groupName}</span>${delBtn}</div>${rows}</div>`;
-    }).join('');
-  }
+  el.innerHTML = watchlistCache.map(i => `
+    <div class="wl-chip" data-code="${i.code}" onclick="loadChart('${i.code}', '${i.name}', '${i.market}', '${i.exchange || ''}')">
+      <span>${i.name}${i.market === 'overseas' ? '<span class="exchange-tag">해외</span>' : ''}</span>
+      <span class="price-col" id="wprice-${i.code}">…</span>
+      <span class="del" onclick="event.stopPropagation(); removeWatch('${i.code}')">✕</span>
+    </div>`).join('') || '<span class="muted" style="white-space:nowrap;">관심종목이 없습니다. 종목 검색 후 추가하세요.</span>';
+
   highlightActiveWatch();
   updateWatchBtnLabel();
   loadWatchPrices();
@@ -849,7 +773,6 @@ function saveSettings() {
       ma120: document.getElementById('ma120-toggle').checked,
       bb: document.getElementById('bb-toggle').checked,
     },
-    hoga: document.getElementById('hoga-toggle').checked,
     lastSymbol: currentSymbol,
   }));
 }
@@ -877,14 +800,24 @@ async function restoreSettings() {
     if (s.lastSymbol) {
       await loadChart(s.lastSymbol.code, s.lastSymbol.name, s.lastSymbol.market, s.lastSymbol.exchange);
     }
-    if (s.hoga && currentSymbol && currentSymbol.market !== 'overseas') {
-      document.getElementById('hoga-toggle').checked = true;
-      toggleHoga();
-    }
   } finally {
     restoringSettings = false;
   }
   saveSettings();
+}
+
+// 차트 쪽 툴바 줄들과 테이블 쪽 탭/요약박스 줄 높이를 실제 렌더링 결과 기준으로 맞춘다.
+// (폰트/화면 크기에 따라 자연 높이가 달라지므로 하드코딩 대신 매번 실측해서 동기화)
+function syncRowHeights(elA, elB) {
+  elA.style.minHeight = '0px';
+  elB.style.minHeight = '0px';
+  const h = Math.max(elA.getBoundingClientRect().height, elB.getBoundingClientRect().height);
+  elA.style.minHeight = h + 'px';
+  elB.style.minHeight = h + 'px';
+}
+function syncColumnHeaders() {
+  syncRowHeights(document.querySelector('.tf-toolbar'), document.querySelector('.tabs'));
+  syncRowHeights(document.querySelector('.indicator-toolbar'), document.getElementById('pnl-summary'));
 }
 
 initChart();
@@ -892,6 +825,16 @@ restoreSettings();
 refreshGroups().then(refreshWatchlist);
 refreshHoldings();
 refreshJournal();
+syncColumnHeaders();
+window.addEventListener('resize', syncColumnHeaders);
+
+// 보유종목 등락률/매매일지/관심종목 가격을 새로고침 없이 주기적으로 갱신
+setInterval(() => {
+  refreshHoldings();
+  refreshJournal();
+  loadWatchPrices();
+  syncColumnHeaders();
+}, 5000);
 </script>
 </body>
 </html>
