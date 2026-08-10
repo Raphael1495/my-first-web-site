@@ -154,15 +154,19 @@ def list_trades_with_pnl() -> list:
 
 
 def compute_holdings() -> list:
-    """매매일지에서 매수/매도를 순차 정산해 현재 보유 수량·평단가를 계산한다."""
+    """매매일지에서 매수/매도를 순차 정산해 현재 보유 수량·평단가를 계산한다.
+    note는 가장 최근 매수 시점의 메모를 그대로 보여준다."""
     trades = sorted(list_trades(), key=lambda t: t["traded_at"])
     positions: dict[str, dict] = {}
     for t in trades:
-        pos = positions.setdefault(t["code"], {"code": t["code"], "name": t["name"], "shares": 0, "avg_price": 0.0})
+        pos = positions.setdefault(
+            t["code"], {"code": t["code"], "name": t["name"], "shares": 0, "avg_price": 0.0, "note": ""}
+        )
         if t["side"] == "buy":
             total_cost = pos["avg_price"] * pos["shares"] + t["price"] * t["shares"]
             pos["shares"] += t["shares"]
             pos["avg_price"] = total_cost / pos["shares"] if pos["shares"] > 0 else 0.0
+            pos["note"] = t["note"] or pos["note"]
         else:
             pos["shares"] -= t["shares"]
     return [p for p in positions.values() if p["shares"] > 0]

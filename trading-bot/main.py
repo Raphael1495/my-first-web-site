@@ -156,9 +156,80 @@ def cmd_live(symbols: list | None = None, max_positions: int | None = None):
         open_count += delta
 
 
+def cmd_live_dry_run(
+    symbols: list | None = None,
+    max_positions: int | None = None,
+    capital: float | None = None,
+    note: str = "auto:sim",
+):
+    """브로커(KIS) 연결 없이, 매매일지(webapp/app.db)만으로 전략 로직을 시뮬레이션한다.
+    실제/모의 주문을 전혀 넣지 않기 때문에 KIS 계좌 상태·인증과 완전히 무관하게 언제든 돌려볼 수 있다.
+    포지션 사이징은 국내/해외 구분 없이 단일 명목자본(capital) 기준이라 금액 자체는 참고용이고,
+    골든/데드크로스 신호가 제대로 걸리는지 + 매매일지에 잘 기록되는지 확인하는 용도다."""
+    from webapp import db
+    from webapp.overseas_symbols import SYMBOLS as OVERSEAS_SYMBOLS
+
+    symbols = symbols if symbols is not None else CONFIG.symbols
+    max_positions = max_positions if max_positions is not None else CONFIG.risk.max_open_positions
+    equity = capital if capital is not None else CONFIG.initial_capital
+
+    holdings = {p["code"]: p for p in db.compute_holdings()}
+    open_count = len(holdings)
+
+    print(f"[모의 스캔] {len(symbols)}개 종목, 명목자본 {equity:,.0f} 기준, "
+          f"동시보유 한도 {max_positions}종목 (현재 {open_count}종목 보유 중)")
+
+    for symbol in symbols:
+        is_domestic = symbol.endswith((".KS", ".KQ"))
+        code = symbol.split(".")[0] if is_domestic else symbol
+        unit = "원" if is_domestic else "$"
+        try:
+            hist = compute_indicators(load_history(symbol, period="1y"), CONFIG.strategy)
+        except Exception as e:
+            print(f"[에러] {symbol}: {e}")
+            continue
+        last = hist.iloc[-1]
+        prev = hist.iloc[-2]
+        chg_pct = (last["Close"] - prev["Close"]) / prev["Close"] * 100 if prev["Close"] else 0.0
+        chg_str = f"{chg_pct:+.2f}%"
+        held = holdings.get(code)
+
+        if held:
+            stop = stop_price(held["avg_price"], last["atr"], CONFIG.strategy)
+            if last["Low"] <= stop or bool(last["dead_cross"]):
+                reason = "손절" if last["Low"] <= stop else "데드크로스"
+                print(f"[모의매도] {symbol} {held['shares']}주 @ {last['Close']:,.2f}{unit} ({chg_str}) ({reason})")
+                db.add_trade(code, symbol, "sell", held["shares"], float(last["Close"]), note=note)
+                del holdings[code]
+                open_count -= 1
+            continue
+
+        if not bool(last["golden_cross"]):
+            print(f"[관찰] {symbol} {last['Close']:,.2f}{unit} ({chg_str}) - 골든크로스 아님")
+            continue
+        if open_count >= max_positions:
+            print(f"[건너뜀] {symbol} {last['Close']:,.2f}{unit} ({chg_str}) - 골든크로스지만 동시보유 한도({max_positions}종목) 도달")
+            continue
+
+        shares = position_size(equity, last["Close"], last["atr"], CONFIG.strategy, CONFIG.risk)
+        if shares > 0:
+            print(f"[모의매수] {symbol} {shares}주 @ {last['Close']:,.2f}{unit} ({chg_str})")
+            db.add_trade(code, symbol, "buy", shares, float(last["Close"]), note=note)
+            holdings[code] = {"code": code, "name": symbol, "shares": shares, "avg_price": float(last["Close"])}
+            open_count += 1
+        else:
+            print(f"[건너뜀] {symbol} {last['Close']:,.2f}{unit} ({chg_str}) - 골든크로스지만 계산된 매수수량이 0")
+
+
 def main():
     parser = argparse.ArgumentParser(description="주식 자동매매 프로그램")
     parser.add_argument("mode", nargs="?", default="backtest", choices=["backtest", "live"])
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="KIS 브로커에 실제/모의 주문을 전혀 넣지 않고, 매매일지(db)만으로 전략 로직을 시뮬레이션한다. "
+             "KIS 인증/계좌 상태와 무관하게 로직 자체(골든크로스 감지, 손절, 동시보유 한도)만 테스트하고 싶을 때 사용.",
+    )
     parser.add_argument(
         "--all-overseas",
         action="store_true",
@@ -171,6 +242,11 @@ def main():
         default=None,
         help="이번 실행에서만 동시보유 한도(config.py의 max_open_positions)를 덮어쓴다. "
              "로직에 걸리는 종목을 최대한 다 사보면서 버그를 찾고 싶을 때 크게 잡아서 쓰면 된다 (예: 999).",
+    )
+    parser.add_argument(
+        "--note",
+        default="auto:sim",
+        help="--dry-run에서 매매일지에 남길 메모(note) 값. 기본값 auto:sim.",
     )
     args = parser.parse_args()
 
@@ -185,7 +261,11 @@ def main():
         all_overseas = [s["code"] for s in OVERSEAS_SYMBOLS]
         symbols = list(dict.fromkeys(list(CONFIG.symbols) + all_overseas))  # 순서 유지 + 중복 제거
         print(f"[--all-overseas] 해외 큐레이션 종목 {len(all_overseas)}개 추가 스캔 (총 {len(symbols)}개)")
-    cmd_live(symbols, max_positions=args.max_positions)
+
+    if args.dry_run:
+        cmd_live_dry_run(symbols, max_positions=args.max_positions, note=args.note)
+    else:
+        cmd_live(symbols, max_positions=args.max_positions)
 
 
 if __name__ == "__main__":

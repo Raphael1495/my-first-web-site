@@ -194,10 +194,10 @@
       <div class="panels-col">
         <div id="panel-holdings" class="panel active">
           <table>
-            <thead><tr><th>코드</th><th>이름</th><th>수량</th><th>평단가</th></tr></thead>
+            <thead><tr><th>코드</th><th>이름</th><th>수량</th><th>평단가</th><th>등락률</th><th>메모</th></tr></thead>
             <tbody id="holdings-body"></tbody>
           </table>
-          <p class="muted">매매일지에 기록된 매수/매도 내역으로 자동 계산됩니다.</p>
+          <p class="muted">매매일지에 기록된 매수/매도 내역으로 자동 계산됩니다. 등락률은 매수평단가 대비 현재가 기준입니다.</p>
         </div>
 
         <div id="panel-journal" class="panel">
@@ -272,6 +272,7 @@ let maSeries = {};
 let bbSeries = {};
 let watchlistCache = [];
 let groupsCache = [];
+let holdingsCache = [];
 let currentChartData = [];
 let currentInterval = '1d';
 let currentMarket = 'domestic';
@@ -419,8 +420,14 @@ async function loadChart(code, name, market, exchange) {
 
   const hogaToggle = document.getElementById('hoga-toggle');
   hogaToggle.disabled = currentSymbol.market === 'overseas';
-  if (currentSymbol.market === 'overseas') { hogaToggle.checked = false; toggleHoga(); }
-  else if (hogaToggle.checked) fetchHoga();
+  if (currentSymbol.market === 'overseas') {
+    if (hogaToggle.checked) { hogaToggle.checked = false; toggleHoga(); }
+  } else if (!hogaToggle.checked) {
+    hogaToggle.checked = true;  // 국내 종목은 항상 오른쪽에 호가창이 보이도록 자동으로 켠다
+    toggleHoga();
+  } else {
+    fetchHoga();
+  }
 
   const res = await fetch(`/api/chart/${code}?interval=${currentInterval}&market=${currentSymbol.market}`);
   if (!res.ok) {
@@ -613,6 +620,25 @@ async function loadWatchPrices() {
   }));
 }
 
+async function loadHoldingPrices() {
+  await Promise.allSettled(holdingsCache.map(async (i) => {
+    const el = document.getElementById(`hchg-${i.code}`);
+    if (!el) return;
+    const market = /^\d+$/.test(i.code) ? 'domestic' : 'overseas';
+    try {
+      const res = await fetch(`/api/quote/${i.code}?market=${market}`);
+      if (!res.ok || !i.avg_price) { el.textContent = '-'; return; }
+      const q = await res.json();
+      const pct = (q.price - i.avg_price) / i.avg_price * 100;
+      const up = pct >= 0;
+      el.textContent = `${up ? '+' : ''}${pct.toFixed(2)}%`;
+      el.className = up ? 'buy' : 'sell';
+    } catch {
+      el.textContent = '-';
+    }
+  }));
+}
+
 async function removeWatch(code) {
   await fetch(`/api/watchlist/${code}`, { method: 'DELETE' });
   refreshWatchlist();
@@ -633,9 +659,14 @@ async function addCurrentToWatchlist() {
 async function refreshHoldings() {
   const res = await fetch('/api/holdings');
   const items = await res.json();
+  holdingsCache = items;
   document.getElementById('holdings-body').innerHTML = items.map(i => `
-    <tr><td>${i.code}</td><td>${i.name}</td><td>${i.shares}</td><td>${Math.round(i.avg_price).toLocaleString()}</td></tr>
-  `).join('') || '<tr><td colspan="4" class="muted">보유 중인 종목이 없습니다.</td></tr>';
+    <tr>
+      <td>${i.code}</td><td>${i.name}</td><td>${i.shares}</td><td>${Math.round(i.avg_price).toLocaleString()}</td>
+      <td id="hchg-${i.code}" class="muted">-</td><td>${i.note || ''}</td>
+    </tr>
+  `).join('') || '<tr><td colspan="6" class="muted">보유 중인 종목이 없습니다.</td></tr>';
+  loadHoldingPrices();
 }
 
 async function refreshJournal() {

@@ -96,6 +96,12 @@ class KISBroker(Broker):
         resp.raise_for_status()
         return resp.json()["output1"]
 
+    def _overseas_account_parts(self) -> tuple[str, str]:
+        """해외주식 전용 계좌번호(KIS_OVERSEAS_ACCOUNT_NO)가 설정돼 있으면 그걸 쓰고,
+        없으면 국내와 같은 계좌번호(kis_account_no)를 그대로 쓴다."""
+        account_no = self.config.kis_overseas_account_no or self.config.kis_account_no
+        return tuple(account_no.split("-"))
+
     def get_balance(self) -> dict:
         cano, prdt_cd = self.config.kis_account_no.split("-")
         resp = requests.get(
@@ -149,7 +155,7 @@ class KISBroker(Broker):
     def get_balance_overseas(self, exchange: str = "NASD", currency: str = "USD") -> dict:
         """해외주식 잔고조회 (예수금 + 보유종목). ⚠️ 미검증 — 모의투자로 먼저 확인할 것.
         거래소(exchange)별로 따로 조회해야 한다 (국내처럼 통합조회가 아님)."""
-        cano, prdt_cd = self.config.kis_account_no.split("-")
+        cano, prdt_cd = self._overseas_account_parts()
         resp = requests.get(
             f"{self.base_url}/uapi/overseas-stock/v1/trading/inquire-balance",
             headers=self._headers(TR_ID_OVERSEAS_BALANCE[self.mode]),
@@ -185,7 +191,7 @@ class KISBroker(Broker):
         exchange 예: NASD(나스닥), NYSE(뉴욕), AMEX(아멕스)."""
         if side not in ("buy", "sell"):
             raise ValueError("side must be 'buy' or 'sell'")
-        cano, prdt_cd = self.config.kis_account_no.split("-")
+        cano, prdt_cd = self._overseas_account_parts()
         resp = requests.post(
             f"{self.base_url}/uapi/overseas-stock/v1/trading/order",
             headers=self._headers(TR_ID_OVERSEAS_ORDER[self.mode][side]),
