@@ -185,9 +185,11 @@ def compute_trade_stats() -> dict:
             pos["avg_price"] = total_cost / pos["shares"] if pos["shares"] > 0 else 0.0
         else:
             sell_shares = min(t["shares"], pos["shares"]) if pos["shares"] > 0 else 0
+            cost = pos["avg_price"] * sell_shares
             pnl = (t["price"] - pos["avg_price"]) * sell_shares
             realized.append(
-                {"code": t["code"], "name": t["name"], "traded_at": t["traded_at"], "shares": sell_shares, "pnl": pnl}
+                {"code": t["code"], "name": t["name"], "traded_at": t["traded_at"], "shares": sell_shares,
+                 "cost": cost, "pnl": pnl}
             )
             pos["shares"] -= t["shares"]
 
@@ -197,9 +199,13 @@ def compute_trade_stats() -> dict:
 
     by_stock: dict[str, dict] = {}
     for r in realized:
-        s = by_stock.setdefault(r["code"], {"code": r["code"], "name": r["name"], "pnl": 0.0, "count": 0})
+        s = by_stock.setdefault(r["code"], {"code": r["code"], "name": r["name"], "pnl": 0.0, "cost": 0.0, "count": 0})
         s["pnl"] += r["pnl"]
+        s["cost"] += r["cost"]
         s["count"] += 1
+    for s in by_stock.values():
+        s["pct"] = round(s["pnl"] / s["cost"] * 100, 2) if s["cost"] else 0.0
+        del s["cost"]
 
     by_month: dict[str, float] = {}
     for r in realized:

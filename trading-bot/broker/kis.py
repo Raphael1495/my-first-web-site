@@ -57,7 +57,7 @@ class KISBroker(Broker):
                 "appkey": self.config.kis_app_key,
                 "appsecret": self.config.kis_app_secret,
             },
-            timeout=10,
+            timeout=20,
         )
         resp.raise_for_status()
         data = resp.json()
@@ -80,7 +80,7 @@ class KISBroker(Broker):
             f"{self.base_url}/uapi/domestic-stock/v1/quotations/inquire-price",
             headers=self._headers(TR_ID_PRICE),
             params={"FID_COND_MRKT_DIV_CODE": "J", "FID_INPUT_ISCD": symbol},
-            timeout=10,
+            timeout=20,
         )
         resp.raise_for_status()
         return float(resp.json()["output"]["stck_prpr"])
@@ -91,7 +91,7 @@ class KISBroker(Broker):
             f"{self.base_url}/uapi/domestic-stock/v1/quotations/inquire-asking-price-exp-ccn",
             headers=self._headers(TR_ID_HOGA),
             params={"FID_COND_MRKT_DIV_CODE": "J", "FID_INPUT_ISCD": symbol},
-            timeout=10,
+            timeout=20,
         )
         resp.raise_for_status()
         return resp.json()["output1"]
@@ -120,7 +120,7 @@ class KISBroker(Broker):
                 "CTX_AREA_FK100": "",
                 "CTX_AREA_NK100": "",
             },
-            timeout=10,
+            timeout=20,
         )
         resp.raise_for_status()
         body = resp.json()
@@ -147,7 +147,7 @@ class KISBroker(Broker):
                 "ORD_QTY": str(shares),
                 "ORD_UNPR": "0",
             },
-            timeout=10,
+            timeout=20,
         )
         resp.raise_for_status()
         return resp.json()
@@ -167,7 +167,7 @@ class KISBroker(Broker):
                 "CTX_AREA_FK200": "",
                 "CTX_AREA_NK200": "",
             },
-            timeout=10,
+            timeout=20,
         )
         resp.raise_for_status()
         body = resp.json()
@@ -204,7 +204,7 @@ class KISBroker(Broker):
                 "OVRS_ORD_UNPR": str(price),
                 "ORD_SVR_DVSN_CD": "0",
             },
-            timeout=10,
+            timeout=20,
         )
         resp.raise_for_status()
         return resp.json()

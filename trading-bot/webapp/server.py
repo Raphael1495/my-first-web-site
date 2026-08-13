@@ -15,11 +15,25 @@ from . import db
 from .krx_symbols import load_symbols, search_symbols
 from .overseas_symbols import search_overseas_symbols
 
-app = FastAPI(title="주식 자동매매 대시보드")
+app = FastAPI(title="Test Dashboard")
 db.init_db()
 
 STATIC_DIR = Path(__file__).parent / "static"
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+
+_broker = None
+
+
+def _get_broker():
+    """KISBroker를 매 요청마다 새로 만들면 토큰도 매번 새로 발급받게 되어
+    KIS의 '토큰 발급 1분당 1회' 제한(EGW00133)에 바로 걸린다. 호가 폴링처럼
+    잦은 호출에서도 토큰이 재사용되도록 프로세스 전역에서 하나만 유지한다."""
+    global _broker
+    if _broker is None:
+        from broker.kis import KISBroker
+
+        _broker = KISBroker(CONFIG)
+    return _broker
 
 
 def _yf_symbol(code: str) -> str:
@@ -113,9 +127,7 @@ def hoga(code: str):
     """KIS 호가 스냅샷을 폴링용으로 정리해서 준다. KIS 미설정/실패 시에도 502 대신
     빈 rows를 줘서 프론트가 '연동 필요' 안내를 보여줄 수 있게 한다."""
     try:
-        from broker.kis import KISBroker
-
-        broker = KISBroker(CONFIG)
+        broker = _get_broker()
         raw = broker.get_hoga(code)
     except Exception as e:
         return {"rows": None, "raw": None, "error": str(e)}
@@ -225,9 +237,7 @@ def place_order_api(req: OrderRequest):
     broker_error = None
     if req.place_real_order:
         try:
-            from broker.kis import KISBroker  # .env/자격증명 없이도 대시보드가 뜨도록 지연 임포트
-
-            broker = KISBroker(CONFIG)
+            broker = _get_broker()
             if req.market == "overseas":
                 broker_result = broker.place_order_overseas(req.code, req.side, req.shares, req.price, req.exchange)
             else:

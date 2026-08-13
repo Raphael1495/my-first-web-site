@@ -1,11 +1,11 @@
 import argparse
 import json
 import sys
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 
 from backtest.engine import run_backtest
-from config import CONFIG
+from config import CONFIG, SURGE_EOD_FLATTEN_HOUR, SURGE_EOD_FLATTEN_MINUTE
 from data.loader import load_history
 from strategy.trend_following import compute_indicators, position_size, stop_price
 
@@ -99,17 +99,91 @@ def _process_overseas(broker, symbol: str, exchange: str, balance: dict, equity:
     return 0
 
 
-def _record_trade(code: str, name: str, side: str, shares: int, price: float):
+def _record_trade(code: str, name: str, side: str, shares: int, price: float, note: str = "auto:live"):
     """대시보드 매매일지(webapp/app.db)에도 남겨서 수동 주문과 동일하게 추적되게 한다."""
     try:
         from webapp import db
 
-        db.add_trade(code, name, side, shares, float(price), note="auto:live")
+        db.add_trade(code, name, side, shares, float(price), note=note)
     except Exception as e:
         print(f"  ⚠️ 매매일지 기록 실패: {e}")
 
 
-def cmd_live(symbols: list | None = None, max_positions: int | None = None):
+def _todays_surge_buy_codes() -> set:
+    """오늘 급등주 전략으로 매수한 종목 코드 집합. 장중엔 이 전략이 실제로 들고 있는
+    포지션이 뭔지 판별하는 용도로, 마감 직전엔 강제청산 대상을 고르는 용도로 쓴다."""
+    from webapp import db
+
+    today = str(date.today())
+    return {
+        t["code"] for t in db.list_trades()
+        if t["side"] == "buy" and t["note"].startswith("auto:surge") and t["traded_at"].startswith(today)
+    }
+
+
+def _flatten_surge_positions(broker, balance: dict):
+    """당일 급등주 전략으로 산 포지션을 전량 시장가로 청산한다 (마감 30분 전용)."""
+    codes = _todays_surge_buy_codes()
+    if not codes:
+        print("[급등주 강제청산] 오늘 매수한 급등주 포지션 없음")
+        return
+    for code in codes:
+        held = balance["positions"].get(code)
+        if not held or held["shares"] <= 0:
+            continue
+        try:
+            price = broker.get_price(code)
+        except Exception:
+            price = held["avg_price"]
+        print(f"[급등주 강제청산] {code} {held['shares']}주 @ {price:,.0f}")
+        broker.place_order(code, "sell", held["shares"])
+        _record_trade(code, code, "sell", held["shares"], price, note="auto:surge 장마감강제청산")
+
+
+def _process_surge(broker, symbol: str, balance: dict, equity: float, open_count: int,
+                    max_positions: int, params, surge_held_codes: set) -> int:
+    """반환값: 신규 진입하면 +1, 청산하면 -1, 아무 일도 없으면 0."""
+    from strategy.momentum_surge import compute_surge_signal
+    from strategy.momentum_surge import position_size as surge_position_size
+    from strategy.momentum_surge import stop_price as surge_stop_price
+
+    code = symbol.split(".")[0]
+    hist = compute_surge_signal(load_history(symbol, period="6mo"), params)
+    last = hist.iloc[-1]
+
+    if code in surge_held_codes:
+        held = balance["positions"].get(code)
+        if not held:
+            return 0
+        stop = surge_stop_price(held["avg_price"], last["atr"], params)
+        if last["Low"] <= stop:
+            print(f"[급등주 매도] {symbol} {held['shares']}주 @ {last['Close']:,.0f} (손절)")
+            broker.place_order(code, "sell", held["shares"])
+            _record_trade(code, symbol, "sell", held["shares"], last["Close"], note="auto:surge 손절")
+            return -1
+        return 0
+
+    # 이미 다른 전략(추세추종 등)이 들고 있는 종목이면 겹치지 않게 건너뛴다.
+    if balance["positions"].get(code):
+        return 0
+
+    if not bool(last["surge_entry"]):
+        return 0
+    if open_count >= max_positions:
+        print(f"[건너뜀] {symbol}: 급등 신호지만 동시보유 한도({max_positions}종목) 도달")
+        return 0
+
+    shares = surge_position_size(equity, last["Close"], last["atr"], params)
+    if shares > 0:
+        print(f"[급등주 매수] {symbol} {shares}주 @ {last['Close']:,.0f} "
+              f"(등락률 {last['change_pct']:+.1f}%, 거래량 {last['volume_ratio']:.1f}배)")
+        broker.place_order(code, "buy", shares)
+        _record_trade(code, symbol, "buy", shares, last["Close"], note="auto:surge")
+        return 1
+    return 0
+
+
+def cmd_live(symbols: list | None = None, max_positions: int | None = None, capital: float | None = None):
     from broker.kis import KISBroker  # 백테스트만 쓸 때는 requests/자격증명이 필요 없도록 지연 임포트
     from webapp.overseas_symbols import SYMBOLS as OVERSEAS_SYMBOLS
 
@@ -119,8 +193,11 @@ def cmd_live(symbols: list | None = None, max_positions: int | None = None):
 
     broker = KISBroker(CONFIG)
     balance = broker.get_balance()
-    equity = balance["cash"] + sum(
-        p["shares"] * p["avg_price"] for p in balance["positions"].values()
+    # capital을 지정하면 KIS 계좌의 실제 잔고 대신 이 명목 자산을 기준으로 포지션 사이징한다.
+    # (계좌엔 실제 주문이 그대로 나가지만, "몇 주 살지" 계산의 기준 시드만 바꾸는 용도.
+    # 이 모드에서는 equity가 매 실행마다 capital로 고정되므로 일일 손실 한도 체크는 사실상 무력화된다.)
+    equity = capital if capital is not None else (
+        balance["cash"] + sum(p["shares"] * p["avg_price"] for p in balance["positions"].values())
     )
 
     today = str(date.today())
@@ -221,9 +298,50 @@ def cmd_live_dry_run(
             print(f"[건너뜀] {symbol} {last['Close']:,.2f}{unit} ({chg_str}) - 골든크로스지만 계산된 매수수량이 0")
 
 
+def cmd_live_surge(symbols: list | None = None, max_positions: int | None = None, capital: float | None = None):
+    """급등주(전일 대비 등락률 + 거래량 급증 + 거래대금) 전략. 국내 전용.
+    장 마감(15:30) 30분 전(기본 15:00)부터는 신규 진입을 멈추고, 당일 이 전략으로 산
+    포지션을 전량 강제청산한다 — 오버나이트 리스크를 피하는 데이트레이딩 스타일이라서."""
+    from broker.kis import KISBroker
+
+    symbols = symbols if symbols is not None else CONFIG.surge_symbols
+    max_positions = max_positions if max_positions is not None else CONFIG.risk.max_open_positions_surge
+    params = CONFIG.surge
+
+    broker = KISBroker(CONFIG)
+    balance = broker.get_balance()
+    equity = capital if capital is not None else (
+        balance["cash"] + sum(p["shares"] * p["avg_price"] for p in balance["positions"].values())
+    )
+
+    now = datetime.now()
+    flatten_at = now.replace(hour=SURGE_EOD_FLATTEN_HOUR, minute=SURGE_EOD_FLATTEN_MINUTE, second=0, microsecond=0)
+    if now >= flatten_at:
+        print(f"[급등주] {now:%H:%M} - 장마감 임박, 신규 진입 중단하고 당일 매수분 강제청산")
+        _flatten_surge_positions(broker, balance)
+        return
+
+    surge_held_codes = {
+        c for c in _todays_surge_buy_codes()
+        if balance["positions"].get(c, {}).get("shares", 0) > 0
+    }
+    open_count = len(surge_held_codes)
+
+    print(f"[급등주 스캔] {len(symbols)}개 종목, 동시보유 한도 {max_positions}종목 "
+          f"(현재 급등주 {open_count}종목 보유 중), {SURGE_EOD_FLATTEN_HOUR:02d}:{SURGE_EOD_FLATTEN_MINUTE:02d}에 강제청산 예정")
+
+    for symbol in symbols:
+        try:
+            delta = _process_surge(broker, symbol, balance, equity, open_count, max_positions, params, surge_held_codes)
+        except Exception as e:
+            print(f"[에러] {symbol}: {e}")
+            continue
+        open_count += delta
+
+
 def main():
     parser = argparse.ArgumentParser(description="주식 자동매매 프로그램")
-    parser.add_argument("mode", nargs="?", default="backtest", choices=["backtest", "live"])
+    parser.add_argument("mode", nargs="?", default="backtest", choices=["backtest", "live", "surge"])
     parser.add_argument(
         "--dry-run",
         action="store_true",
@@ -248,10 +366,21 @@ def main():
         default="auto:sim",
         help="--dry-run에서 매매일지에 남길 메모(note) 값. 기본값 auto:sim.",
     )
+    parser.add_argument(
+        "--capital",
+        type=float,
+        default=None,
+        help="live 모드에서 포지션 사이징에 쓸 명목 자산(원). 지정하면 KIS 계좌 실제 잔고 대신 "
+             "이 값을 기준으로 매수 수량을 계산한다 (주문 자체는 그대로 KIS 계좌에 나간다).",
+    )
     args = parser.parse_args()
 
     if args.mode == "backtest":
         cmd_backtest()
+        return
+
+    if args.mode == "surge":
+        cmd_live_surge(max_positions=args.max_positions, capital=args.capital)
         return
 
     symbols = CONFIG.symbols
@@ -263,9 +392,9 @@ def main():
         print(f"[--all-overseas] 해외 큐레이션 종목 {len(all_overseas)}개 추가 스캔 (총 {len(symbols)}개)")
 
     if args.dry_run:
-        cmd_live_dry_run(symbols, max_positions=args.max_positions, note=args.note)
+        cmd_live_dry_run(symbols, max_positions=args.max_positions, capital=args.capital, note=args.note)
     else:
-        cmd_live(symbols, max_positions=args.max_positions)
+        cmd_live(symbols, max_positions=args.max_positions, capital=args.capital)
 
 
 if __name__ == "__main__":

@@ -6,3 +6,4 @@ backtest_equity_curve.csv
 venv/
 .venv/
 webapp/krx_symbols_cache.json
+kis_ca_bundle.pem

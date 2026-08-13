@@ -1,0 +1,67 @@
+import math
+from dataclasses import dataclass
+
+import pandas as pd
+
+
+@dataclass
+class SurgeParams:
+    change_pct_threshold: float = 7.0  # 전일 종가 대비 등락률(%) 이 값 이상이어야 진입
+    volume_multiple: float = 3.0  # 거래량이 최근 평균 대비 이 배수 이상이어야 진입
+    volume_avg_period: int = 20  # 평균 거래량 계산 기간(일)
+    min_trading_value: float = 5_000_000_000.0  # 최소 거래대금(원). 저유동성 종목 걸러내는 필터
+    atr_period: int = 14
+    atr_stop_multiple: float = 1.2  # 추세추종(2.0)보다 타이트한 손절 — 급등주는 변동성이 커서 빨리 끊어야 함
+    risk_per_trade: float = 0.01  # 계좌 자산 대비 1건당 허용 손실 비율
+    max_position_weight: float = 0.1  # 종목당 최대 비중 — 추세추종(0.2)보다 보수적으로
+
+
+def compute_surge_signal(df: pd.DataFrame, params: SurgeParams) -> pd.DataFrame:
+    """전일 대비 등락률 + 거래량 급증 + 거래대금(유동성) 세 조건을 모두 만족하는 날을
+    급등 진입 시그널로 표시한다."""
+    out = df.copy()
+    prev_close = out["Close"].shift(1)
+
+    out["change_pct"] = (out["Close"] - prev_close) / prev_close * 100
+
+    avg_volume = out["Volume"].rolling(params.volume_avg_period).mean().shift(1)
+    out["volume_ratio"] = out["Volume"] / avg_volume
+
+    out["trading_value"] = out["Close"] * out["Volume"]
+
+    tr = pd.concat(
+        [
+            out["High"] - out["Low"],
+            (out["High"] - prev_close).abs(),
+            (out["Low"] - prev_close).abs(),
+        ],
+        axis=1,
+    ).max(axis=1)
+    out["atr"] = tr.rolling(params.atr_period).mean()
+
+    out["surge_entry"] = (
+        (out["change_pct"] >= params.change_pct_threshold)
+        & (out["volume_ratio"] >= params.volume_multiple)
+        & (out["trading_value"] >= params.min_trading_value)
+    )
+    return out
+
+
+def stop_price(entry_price: float, atr_at_entry: float, params: SurgeParams) -> float:
+    return entry_price - atr_at_entry * params.atr_stop_multiple
+
+
+def position_size(capital: float, entry_price: float, atr: float, params: SurgeParams) -> int:
+    """계좌 자산 대비 리스크(risk_per_trade)와 종목당 최대 비중(max_position_weight) 중
+    더 보수적인 값으로 매수 수량을 정한다."""
+    stop_distance = atr * params.atr_stop_multiple
+    if stop_distance <= 0 or entry_price <= 0:
+        return 0
+
+    risk_amount = capital * params.risk_per_trade
+    shares_by_risk = risk_amount / stop_distance
+
+    max_notional = capital * params.max_position_weight
+    shares_by_weight = max_notional / entry_price
+
+    return max(0, math.floor(min(shares_by_risk, shares_by_weight)))
