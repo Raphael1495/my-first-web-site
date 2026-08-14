@@ -8,9 +8,11 @@ import requests
 from config import CONFIG
 
 
-def send_trade_alert(code: str, name: str, side: str, shares: int, price: float, extra: dict | None = None):
+def send_trade_alert(code: str, name: str, side: str, shares: int, price: float,
+                      extra: dict | None = None, pnl_pct: float | None = None):
     """extra는 종목명/코드/수량/단가 아래에 "키 : 값" 형식으로 덧붙일 상세 정보
-    (예: {"사유": "익절"}, {"체결강도": "101%"})."""
+    (예: {"사유": "익절"}, {"체결강도": "101%"}). pnl_pct는 매도일 때 매도단가 바로
+    아래에 "수익률" 줄로 추가된다 (매수평단가 대비 손익률, +/- 부호 포함)."""
     if not CONFIG.telegram_bot_token or not CONFIG.telegram_chat_id:
         return
 
@@ -27,6 +29,8 @@ def send_trade_alert(code: str, name: str, side: str, shares: int, price: float,
         f"수량 : {shares}주",
         f"{price_label} : {price_str}",
     ]
+    if pnl_pct is not None:
+        lines.append(f"수익률 : {pnl_pct:+.1f}%")
     for key, value in (extra or {}).items():
         lines.append(f"{key} : {value}")
     text = "\n".join(lines)

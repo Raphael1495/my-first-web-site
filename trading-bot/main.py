@@ -80,7 +80,8 @@ def _process_domestic(broker, symbol: str, balance: dict, equity: float, open_co
             print(f"[매도] {symbol} {held['shares']}주 @ {exit_price:,.0f} ({reason})")
             broker.place_order(kis_code, "sell", held["shares"])
             _record_trade(kis_code, symbol, "sell", held["shares"], exit_price,
-                           note=f"auto:live {reason}", extra={"사유": reason})
+                           note=f"auto:live {reason}", extra={"사유": reason},
+                           pnl_pct=(exit_price - entry_price) / entry_price * 100)
             return -1
         return 0
 
@@ -124,7 +125,8 @@ def _process_overseas(broker, symbol: str, exchange: str, balance: dict, equity:
             print(f"[매도] {symbol} {held['shares']}주 @ ${exit_price:,.2f} ({reason})")
             broker.place_order_overseas(symbol, "sell", held["shares"], exit_price, exchange)
             _record_trade(symbol, symbol, "sell", held["shares"], exit_price,
-                           note=f"auto:live {reason}", extra={"사유": reason})
+                           note=f"auto:live {reason}", extra={"사유": reason},
+                           pnl_pct=(exit_price - entry_price) / entry_price * 100)
             return -1
         return 0
 
@@ -146,10 +148,11 @@ def _process_overseas(broker, symbol: str, exchange: str, balance: dict, equity:
 
 
 def _record_trade(code: str, name: str, side: str, shares: int, price: float, note: str = "auto:live",
-                   extra: dict | None = None):
+                   extra: dict | None = None, pnl_pct: float | None = None):
     """대시보드 매매일지(webapp/app.db)에도 남겨서 수동 주문과 동일하게 추적되게 한다.
     매수인 경우엔 관심종목에도 같이 넣어서 대시보드 상단에서 바로 보이게 한다.
-    extra는 텔레그램 알림에 종목명/코드/수량/단가 아래로 덧붙일 상세 정보(사유, 체결강도 등)."""
+    extra는 텔레그램 알림에 종목명/코드/수량/단가 아래로 덧붙일 상세 정보(사유, 체결강도 등).
+    pnl_pct는 매도일 때 매수평단가 대비 손익률(%) — 알림에 "수익률" 줄로 붙는다."""
     try:
         from webapp import db
 
@@ -163,7 +166,7 @@ def _record_trade(code: str, name: str, side: str, shares: int, price: float, no
 
     from notify import send_trade_alert
 
-    send_trade_alert(code, name, side, shares, float(price), extra=extra)
+    send_trade_alert(code, name, side, shares, float(price), extra=extra, pnl_pct=pnl_pct)
 
 
 def _todays_strategy_buy_codes(note_prefix: str = "auto:surge", market: str = "all") -> set:
@@ -200,7 +203,8 @@ def _flatten_strategy_positions(broker, balance: dict, note_prefix: str = "auto:
             price = held["avg_price"]
         print(f"[{label} 강제청산] {code} {held['shares']}주 @ {price:,.0f}")
         broker.place_order(code, "sell", held["shares"])
-        _record_trade(code, code, "sell", held["shares"], price, note=f"{note_prefix} 장마감강제청산", extra={"사유": "장마감강제청산"})
+        _record_trade(code, code, "sell", held["shares"], price, note=f"{note_prefix} 장마감강제청산",
+                      extra={"사유": "장마감강제청산"}, pnl_pct=(price - held["avg_price"]) / held["avg_price"] * 100)
 
 
 def _flatten_strategy_positions_overseas(broker, get_ob, overseas_exchange: dict,
@@ -223,7 +227,8 @@ def _flatten_strategy_positions_overseas(broker, get_ob, overseas_exchange: dict
             price = held["avg_price"]
         print(f"[{label} 강제청산] {code} {held['shares']}주 @ ${price:,.2f}")
         broker.place_order_overseas(code, "sell", held["shares"], price, exchange)
-        _record_trade(code, code, "sell", held["shares"], price, note=f"{note_prefix} 장마감강제청산", extra={"사유": "장마감강제청산"})
+        _record_trade(code, code, "sell", held["shares"], price, note=f"{note_prefix} 장마감강제청산",
+                      extra={"사유": "장마감강제청산"}, pnl_pct=(price - held["avg_price"]) / held["avg_price"] * 100)
 
 
 def _process_surge(broker, symbol: str, balance: dict, equity: float, open_count: int,
@@ -252,7 +257,8 @@ def _process_surge(broker, symbol: str, balance: dict, equity: float, open_count
             print(f"[급등주 매도] {symbol} {held['shares']}주 @ {exit_price:,.0f} ({reason})")
             broker.place_order(code, "sell", held["shares"])
             _record_trade(code, symbol, "sell", held["shares"], exit_price, note=f"auto:surge {reason}",
-                          extra={"사유": reason})
+                          extra={"사유": reason},
+                          pnl_pct=(exit_price - held["avg_price"]) / held["avg_price"] * 100)
             return -1
         return 0
 
@@ -304,7 +310,8 @@ def _process_surge_overseas(broker, symbol: str, exchange: str, balance: dict, e
             print(f"[급등주-해외 매도] {symbol} {held['shares']}주 @ ${exit_price:,.2f} ({reason})")
             broker.place_order_overseas(symbol, "sell", held["shares"], exit_price, exchange)
             _record_trade(symbol, symbol, "sell", held["shares"], exit_price, note=f"auto:surge {reason}",
-                          extra={"사유": reason})
+                          extra={"사유": reason},
+                          pnl_pct=(exit_price - held["avg_price"]) / held["avg_price"] * 100)
             return -1
         return 0
 
@@ -357,7 +364,8 @@ def _process_reversion(broker, symbol: str, balance: dict, equity: float, open_c
             print(f"[이평회귀 매도] {symbol} {held['shares']}주 @ {exit_price:,.0f} ({reason})")
             broker.place_order(code, "sell", held["shares"])
             _record_trade(code, symbol, "sell", held["shares"], exit_price, note=f"auto:reversion {reason}",
-                          extra={"사유": reason})
+                          extra={"사유": reason},
+                          pnl_pct=(exit_price - held["avg_price"]) / held["avg_price"] * 100)
             return -1
         return 0
 
@@ -418,7 +426,8 @@ def _process_reversion_overseas(broker, symbol: str, exchange: str, balance: dic
             print(f"[이평회귀-해외 매도] {symbol} {held['shares']}주 @ ${exit_price:,.2f} ({reason})")
             broker.place_order_overseas(symbol, "sell", held["shares"], exit_price, exchange)
             _record_trade(symbol, symbol, "sell", held["shares"], exit_price, note=f"auto:reversion {reason}",
-                          extra={"사유": reason})
+                          extra={"사유": reason},
+                          pnl_pct=(exit_price - held["avg_price"]) / held["avg_price"] * 100)
             return -1
         return 0
 

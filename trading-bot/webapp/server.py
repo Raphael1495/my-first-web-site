@@ -231,13 +231,18 @@ def get_trades():
 def post_trades(item: TradeItem):
     if item.side not in ("buy", "sell"):
         raise HTTPException(status_code=400, detail="side must be 'buy' or 'sell'")
+    pnl_pct = None
+    if item.side == "sell":
+        held = {p["code"]: p for p in db.compute_holdings()}.get(item.code)
+        if held and held["avg_price"]:
+            pnl_pct = (item.price - held["avg_price"]) / held["avg_price"] * 100
     db.add_trade(item.code, item.name, item.side, item.shares, item.price, item.note)
     if item.side == "buy":
         # 자동매매(main.py)와 달리 수동 기록은 사람이 직접 관리하는 관심종목을 건드리지
         # 않도록, 추가만 하고 기존 항목을 정리(prune)하지는 않는다.
         db.add_watchlist(item.code, item.name, market=item.market, exchange=item.exchange)
     send_trade_alert(item.code, item.name, item.side, item.shares, item.price,
-                      extra={"메모": item.note} if item.note else None)
+                      extra={"메모": item.note} if item.note else None, pnl_pct=pnl_pct)
     return {"ok": True}
 
 
@@ -251,6 +256,12 @@ def place_order_api(req: OrderRequest):
     KIS 키가 없거나 주문이 실패해도 매매일지 기록 자체는 항상 남긴다."""
     if req.side not in ("buy", "sell"):
         raise HTTPException(status_code=400, detail="side must be 'buy' or 'sell'")
+
+    pnl_pct = None
+    if req.side == "sell":
+        held = {p["code"]: p for p in db.compute_holdings()}.get(req.code)
+        if held and held["avg_price"]:
+            pnl_pct = (req.price - held["avg_price"]) / held["avg_price"] * 100
 
     broker_result = None
     broker_error = None
@@ -268,7 +279,7 @@ def place_order_api(req: OrderRequest):
     if req.side == "buy":
         db.add_watchlist(req.code, req.name, market=req.market, exchange=req.exchange)
     send_trade_alert(req.code, req.name, req.side, req.shares, req.price,
-                      extra={"메모": req.note} if req.note else None)
+                      extra={"메모": req.note} if req.note else None, pnl_pct=pnl_pct)
     return {"ok": True, "broker_result": broker_result, "broker_error": broker_error}
 
 

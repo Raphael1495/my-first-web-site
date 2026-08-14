@@ -142,7 +142,8 @@ def sell_phase(position_mode: dict, position_symbol: dict, surge_params, reversi
         unit = "원" if is_domestic(yf_symbol) else "$"
         print(f"  [모의매도:{reason}] {code} {pos['shares']}주 @ {price:,.2f}{unit}")
         db.add_trade(code, pos["name"], "sell", pos["shares"], price, note=NOTE)
-        send_trade_alert(code, pos["name"], "sell", pos["shares"], price, extra={"구분": "모의투자", "사유": reason})
+        send_trade_alert(code, pos["name"], "sell", pos["shares"], price, extra={"구분": "모의투자", "사유": reason},
+                          pnl_pct=(price - pos["avg_price"]) / pos["avg_price"] * 100)
         position_mode.pop(code, None)
         position_symbol.pop(code, None)
 
