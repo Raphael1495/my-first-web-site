@@ -9,7 +9,7 @@ from pydantic import BaseModel
 
 from backtest.engine import run_backtest as run_backtest_engine
 from config import CONFIG, Config, RiskLimits, StrategyParams
-from data.loader import load_history
+from data.loader import get_live_quote, load_history
 from notify import send_trade_alert
 
 from . import db
@@ -110,6 +110,14 @@ def chart(code: str, interval: str = "1d", market: str = "domestic"):
 
 @app.get("/api/quote/{code}")
 def quote(code: str, market: str = "domestic"):
+    if market == "overseas":
+        live = get_live_quote(code)
+        if live:
+            diff = live["price"] - live["prev_close"]
+            pct = (diff / live["prev_close"] * 100) if live["prev_close"] else 0.0
+            return {"code": code, "price": live["price"], "diff": diff, "pct": round(pct, 2),
+                    "session": live["session"]}
+
     try:
         df = load_history(_chart_symbol(code, market), period="5d", interval="1d")
     except Exception as e:

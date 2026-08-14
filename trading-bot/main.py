@@ -8,7 +8,7 @@ from zoneinfo import ZoneInfo
 
 from backtest.engine import run_backtest
 from config import CONFIG, EOD_FLATTEN_KR_HOUR, EOD_FLATTEN_KR_MINUTE, EOD_FLATTEN_US_HOUR, EOD_FLATTEN_US_MINUTE
-from data.loader import load_history
+from data.loader import get_live_quote, load_history
 from strategy.trend_following import compute_indicators, position_size, stop_price, take_profit_price
 
 STATE_FILE = Path(__file__).parent / ".state.json"
@@ -110,22 +110,35 @@ def _process_overseas(broker, symbol: str, exchange: str, balance: dict, equity:
     last = hist.iloc[-1]
     held = balance["positions"].get(symbol)
 
+    live = get_live_quote(symbol)  # 정규장/프리마켓/애프터마켓 중 가장 최근 실제 체결가
+    current_price = live["price"] if live else None
+    session = live["session"] if live else None
+
     if held:
         entry_price = held["avg_price"]
         stop = stop_price(entry_price, last["atr"], CONFIG.strategy)
         target = take_profit_price(entry_price, CONFIG.strategy)
-        hit_stop = last["Low"] <= stop
-        hit_target = last["High"] >= target
+        if current_price is not None:
+            hit_stop = current_price <= stop
+            hit_target = current_price >= target
+        else:
+            hit_stop = last["Low"] <= stop
+            hit_target = last["High"] >= target
         signal_exit = hit_stop or hit_target or bool(last["dead_cross"])
         if signal_exit or near_close:
             reason = "장마감강제청산" if near_close and not signal_exit else (
                 "손절" if hit_stop else ("익절" if hit_target else "데드크로스")
             )
-            exit_price = target if hit_target and not hit_stop else last["Close"]
-            print(f"[매도] {symbol} {held['shares']}주 @ ${exit_price:,.2f} ({reason})")
+            exit_price = current_price if current_price is not None else (
+                target if hit_target and not hit_stop else last["Close"])
+            session_tag = f" [{session}]" if session else ""
+            print(f"[매도]{session_tag} {symbol} {held['shares']}주 @ ${exit_price:,.2f} ({reason})")
             broker.place_order_overseas(symbol, "sell", held["shares"], exit_price, exchange)
+            extra = {"사유": reason}
+            if session:
+                extra["세션"] = session
             _record_trade(symbol, symbol, "sell", held["shares"], exit_price,
-                           note=f"auto:live {reason}", extra={"사유": reason},
+                           note=f"auto:live {reason}", extra=extra,
                            pnl_pct=(exit_price - entry_price) / entry_price * 100)
             return -1
         return 0
@@ -138,11 +151,16 @@ def _process_overseas(broker, symbol: str, exchange: str, balance: dict, equity:
         print(f"[건너뜀] {symbol}: 골든크로스지만 동시보유 한도({max_positions}종목) 도달")
         return 0
 
-    shares = position_size(equity, last["Close"], last["atr"], CONFIG.strategy, CONFIG.risk)
+    fill_price = current_price if current_price is not None else last["Close"]
+    shares = position_size(equity, fill_price, last["atr"], CONFIG.strategy, CONFIG.risk)
     if shares > 0:
-        print(f"[매수] {symbol} {shares}주 @ ${last['Close']:,.2f}")
-        broker.place_order_overseas(symbol, "buy", shares, last["Close"], exchange)
-        _record_trade(symbol, symbol, "buy", shares, last["Close"], extra={"전략": "골든크로스"})
+        session_tag = f" [{session}]" if session else ""
+        print(f"[매수]{session_tag} {symbol} {shares}주 @ ${fill_price:,.2f}")
+        broker.place_order_overseas(symbol, "buy", shares, fill_price, exchange)
+        extra = {"전략": "골든크로스"}
+        if session:
+            extra["세션"] = session
+        _record_trade(symbol, symbol, "buy", shares, fill_price, extra=extra)
         return 1
     return 0
 
@@ -296,21 +314,34 @@ def _process_surge_overseas(broker, symbol: str, exchange: str, balance: dict, e
     hist = compute_surge_signal(load_history(symbol, period="6mo"), params_usd)
     last = hist.iloc[-1]
 
+    live = get_live_quote(symbol)
+    current_price = live["price"] if live else None
+    session = live["session"] if live else None
+
     if symbol in surge_held_codes:
         held = balance["positions"].get(symbol)
         if not held:
             return 0
         stop = surge_stop_price(held["avg_price"], last["atr"], params_usd)
         target = surge_take_profit_price(held["avg_price"], params_usd)
-        hit_stop = last["Low"] <= stop
-        hit_target = last["High"] >= target
+        if current_price is not None:
+            hit_stop = current_price <= stop
+            hit_target = current_price >= target
+        else:
+            hit_stop = last["Low"] <= stop
+            hit_target = last["High"] >= target
         if hit_stop or hit_target:
             reason = "손절" if hit_stop else "익절"
-            exit_price = target if hit_target and not hit_stop else last["Close"]
-            print(f"[급등주-해외 매도] {symbol} {held['shares']}주 @ ${exit_price:,.2f} ({reason})")
+            exit_price = current_price if current_price is not None else (
+                target if hit_target and not hit_stop else last["Close"])
+            session_tag = f" [{session}]" if session else ""
+            print(f"[급등주-해외 매도]{session_tag} {symbol} {held['shares']}주 @ ${exit_price:,.2f} ({reason})")
             broker.place_order_overseas(symbol, "sell", held["shares"], exit_price, exchange)
+            extra = {"사유": reason}
+            if session:
+                extra["세션"] = session
             _record_trade(symbol, symbol, "sell", held["shares"], exit_price, note=f"auto:surge {reason}",
-                          extra={"사유": reason},
+                          extra=extra,
                           pnl_pct=(exit_price - held["avg_price"]) / held["avg_price"] * 100)
             return -1
         return 0
@@ -324,13 +355,17 @@ def _process_surge_overseas(broker, symbol: str, exchange: str, balance: dict, e
         print(f"[건너뜀] {symbol}: 급등 신호지만 동시보유 한도({max_positions}종목) 도달")
         return 0
 
-    shares = surge_position_size(equity, last["Close"], last["atr"], params_usd)
+    fill_price = current_price if current_price is not None else last["Close"]
+    shares = surge_position_size(equity, fill_price, last["atr"], params_usd)
     if shares > 0:
-        print(f"[급등주-해외 매수] {symbol} {shares}주 @ ${last['Close']:,.2f} "
+        session_tag = f" [{session}]" if session else ""
+        print(f"[급등주-해외 매수]{session_tag} {symbol} {shares}주 @ ${fill_price:,.2f} "
               f"(등락률 {last['change_pct']:+.1f}%, 거래량 {last['volume_ratio']:.1f}배)")
-        broker.place_order_overseas(symbol, "buy", shares, last["Close"], exchange)
-        _record_trade(symbol, symbol, "buy", shares, last["Close"], note="auto:surge",
-                      extra={"등락률": f"{last['change_pct']:+.1f}%", "거래량": f"{last['volume_ratio']:.1f}배"})
+        broker.place_order_overseas(symbol, "buy", shares, fill_price, exchange)
+        extra = {"등락률": f"{last['change_pct']:+.1f}%", "거래량": f"{last['volume_ratio']:.1f}배"}
+        if session:
+            extra["세션"] = session
+        _record_trade(symbol, symbol, "buy", shares, fill_price, note="auto:surge", extra=extra)
         return 1
     return 0
 
@@ -411,22 +446,35 @@ def _process_reversion_overseas(broker, symbol: str, exchange: str, balance: dic
     hist = compute_reversion_signal(load_history(symbol, period="1y"), params)
     last = hist.iloc[-1]
 
+    live = get_live_quote(symbol)
+    current_price = live["price"] if live else None
+    session = live["session"] if live else None
+
     if symbol in reversion_held_codes:
         held = balance["positions"].get(symbol)
         if not held:
             return 0
         stop = reversion_stop_price(held["avg_price"], last["atr"], params)
         target = reversion_take_profit_price(held["avg_price"], params)
-        hit_stop = last["Low"] <= stop
-        hit_target = last["High"] >= target
+        if current_price is not None:
+            hit_stop = current_price <= stop
+            hit_target = current_price >= target
+        else:
+            hit_stop = last["Low"] <= stop
+            hit_target = last["High"] >= target
         reverted = bool(last["reversion_exit"])
         if hit_stop or hit_target or reverted:
             reason = "손절" if hit_stop else ("익절" if hit_target else "이평선회귀")
-            exit_price = target if hit_target and not hit_stop else last["Close"]
-            print(f"[이평회귀-해외 매도] {symbol} {held['shares']}주 @ ${exit_price:,.2f} ({reason})")
+            exit_price = current_price if current_price is not None else (
+                target if hit_target and not hit_stop else last["Close"])
+            session_tag = f" [{session}]" if session else ""
+            print(f"[이평회귀-해외 매도]{session_tag} {symbol} {held['shares']}주 @ ${exit_price:,.2f} ({reason})")
             broker.place_order_overseas(symbol, "sell", held["shares"], exit_price, exchange)
+            extra = {"사유": reason}
+            if session:
+                extra["세션"] = session
             _record_trade(symbol, symbol, "sell", held["shares"], exit_price, note=f"auto:reversion {reason}",
-                          extra={"사유": reason},
+                          extra=extra,
                           pnl_pct=(exit_price - held["avg_price"]) / held["avg_price"] * 100)
             return -1
         return 0
@@ -440,13 +488,17 @@ def _process_reversion_overseas(broker, symbol: str, exchange: str, balance: dic
         print(f"[건너뜀] {symbol}: 이평선 이격 신호지만 동시보유 한도({max_positions}종목) 도달")
         return 0
 
-    shares = reversion_position_size(equity, last["Close"], last["atr"], params)
+    fill_price = current_price if current_price is not None else last["Close"]
+    shares = reversion_position_size(equity, fill_price, last["atr"], params)
     if shares > 0:
-        print(f"[이평회귀-해외 매수] {symbol} {shares}주 @ ${last['Close']:,.2f} "
+        session_tag = f" [{session}]" if session else ""
+        print(f"[이평회귀-해외 매수]{session_tag} {symbol} {shares}주 @ ${fill_price:,.2f} "
               f"(이격도 {last['deviation_pct']:+.1f}%)")
-        broker.place_order_overseas(symbol, "buy", shares, last["Close"], exchange)
-        _record_trade(symbol, symbol, "buy", shares, last["Close"], note="auto:reversion",
-                      extra={"이격도": f"{last['deviation_pct']:.1f}%"})
+        broker.place_order_overseas(symbol, "buy", shares, fill_price, exchange)
+        extra = {"이격도": f"{last['deviation_pct']:.1f}%"}
+        if session:
+            extra["세션"] = session
+        _record_trade(symbol, symbol, "buy", shares, fill_price, note="auto:reversion", extra=extra)
         return 1
     return 0
 
@@ -587,10 +639,15 @@ def cmd_live_surge(symbols: list | None = None, symbols_us: list | None = None,
     멈추고, 당일 이 전략으로 산 포지션을 전량 강제청산한다 — 오버나이트 리스크를 피하는
     데이트레이딩 스타일이라서. 국내/해외 동시보유 한도는 각자 따로 적용된다."""
     from broker.kis import KISBroker
+    from data.screener import fetch_us_day_gainers
     from webapp.overseas_symbols import SYMBOLS as OVERSEAS_SYMBOLS
 
     symbols = symbols if symbols is not None else CONFIG.surge_symbols
-    symbols_us = symbols_us if symbols_us is not None else CONFIG.surge_symbols_us
+    if symbols_us is None:
+        dynamic = fetch_us_day_gainers()
+        symbols_us = list(dict.fromkeys(list(CONFIG.surge_symbols_us) + dynamic))
+        if dynamic:
+            print(f"[급등주-해외] 오늘의 급등주 스크리너 {len(dynamic)}종목 추가 스캔: {dynamic}")
     overseas_exchange = {s["code"]: s["exchange"] for s in OVERSEAS_SYMBOLS}
     max_positions = max_positions if max_positions is not None else CONFIG.risk.max_open_positions_surge
     params = CONFIG.surge

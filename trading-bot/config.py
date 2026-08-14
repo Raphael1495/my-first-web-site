@@ -50,10 +50,15 @@ SURGE_UNIVERSE = [
     "251270.KS", "086520.KS", "247540.KS", "373220.KS", "066970.KS",
 ]
 
-# 급등주 스캔용 해외(미국) 유니버스 — 관심종목 검색 큐레이션 목록을 그대로 재사용한다.
-# 대형 우량주(관심종목 큐레이션) + 변동성 큰 소형주 몇 개를 더해서 실제로 급등 신호가
-# 걸릴 확률을 높인다 (대형주만으로는 +7%/거래량 급증 조건이 거의 안 걸림).
-SURGE_UNIVERSE_US = [s["code"] for s in _OVERSEAS_SYMBOLS] + ["DFSC", "FGI"]
+# 급등주 스캔용 해외(미국) 유니버스 — 관심종목 검색 큐레이션 목록(대형 우량주)을 기본
+# 후보로 쓴다. 실제 "오늘의 급등주"는 매일 바뀌므로 특정 소형주를 여기 고정해두지 않고,
+# main.py/dry_run_cycle.py에서 스캔 직전에 data/screener.py의 야후 Day Gainers 스크리너로
+# 그날 실제 등락률 상위 종목을 동적으로 가져와 이 목록에 섞어서 쓴다.
+SURGE_UNIVERSE_US = [s["code"] for s in _OVERSEAS_SYMBOLS]
+
+# 이평선회귀는 급등주와 달리 "오늘 급등한 종목"이 아니라 유동성 좋은 대형주를 대상으로
+# 하므로 소형주를 섞지 않는다 (급등주 유니버스와 분리해서 따로 둔다).
+REVERSION_UNIVERSE_US = list(SURGE_UNIVERSE_US)
 
 # 이 시각부터 신규 진입을 멈추고, 당일 매수분은 전량 강제청산한다 (모두 한국시간/Asia/Seoul 기준).
 # 써머타임 기준: 국내장 09:00~15:20, 해외(미국)장 10:30~익일 05:00.
@@ -86,7 +91,7 @@ class Config:
     reversion: ReversionParams = field(default_factory=ReversionParams)
     # 급등주와 같은 유동성 좋은 유니버스를 재사용 (이평선회귀도 대형주 대상 역추세 전략이라 적합)
     reversion_symbols: list = field(default_factory=lambda: list(SURGE_UNIVERSE))
-    reversion_symbols_us: list = field(default_factory=lambda: list(SURGE_UNIVERSE_US))
+    reversion_symbols_us: list = field(default_factory=lambda: list(REVERSION_UNIVERSE_US))
 
     # KIS Developers 자격증명 (.env 에서 로드)
     kis_app_key: str = os.getenv("KIS_APP_KEY", "")
