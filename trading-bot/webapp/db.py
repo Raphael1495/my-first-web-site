@@ -112,6 +112,19 @@ def list_watchlist() -> list:
     return [dict(r) for r in rows]
 
 
+def prune_watchlist(keep_codes: set):
+    """keep_codes에 없는 관심종목은 전부 지운다. 자동매매가 사면 관심종목을 그 시점
+    실제 보유종목 목록으로 동기화(=옛날에 넣어둔/이미 판 종목은 정리)하는 용도."""
+    conn = get_conn()
+    if keep_codes:
+        placeholders = ",".join("?" for _ in keep_codes)
+        conn.execute(f"DELETE FROM watchlist WHERE code NOT IN ({placeholders})", tuple(keep_codes))
+    else:
+        conn.execute("DELETE FROM watchlist")
+    conn.commit()
+    conn.close()
+
+
 def add_trade(code: str, name: str, side: str, shares: int, price: float, note: str = ""):
     conn = get_conn()
     conn.execute(

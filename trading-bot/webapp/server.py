@@ -10,6 +10,7 @@ from pydantic import BaseModel
 from backtest.engine import run_backtest as run_backtest_engine
 from config import CONFIG, Config, RiskLimits, StrategyParams
 from data.loader import load_history
+from notify import send_trade_alert
 
 from . import db
 from .krx_symbols import load_symbols, search_symbols
@@ -122,6 +123,18 @@ def quote(code: str, market: str = "domestic"):
     return {"code": code, "price": float(last["Close"]), "diff": diff, "pct": round(pct, 2)}
 
 
+@app.get("/api/fxrate")
+def fxrate():
+    """실시간 USD/KRW 환율. 해외 보유종목 평가손익을 원화로 환산할 때 쓴다."""
+    try:
+        df = load_history("KRW=X", period="5d", interval="1d")
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e))
+    if len(df) == 0:
+        raise HTTPException(status_code=502, detail="환율 데이터 없음")
+    return {"rate": float(df.iloc[-1]["Close"])}
+
+
 @app.get("/api/hoga/{code}")
 def hoga(code: str):
     """KIS 호가 스냅샷을 폴링용으로 정리해서 준다. KIS 미설정/실패 시에도 502 대신
@@ -219,6 +232,12 @@ def post_trades(item: TradeItem):
     if item.side not in ("buy", "sell"):
         raise HTTPException(status_code=400, detail="side must be 'buy' or 'sell'")
     db.add_trade(item.code, item.name, item.side, item.shares, item.price, item.note)
+    if item.side == "buy":
+        # 자동매매(main.py)와 달리 수동 기록은 사람이 직접 관리하는 관심종목을 건드리지
+        # 않도록, 추가만 하고 기존 항목을 정리(prune)하지는 않는다.
+        db.add_watchlist(item.code, item.name, market=item.market, exchange=item.exchange)
+    send_trade_alert(item.code, item.name, item.side, item.shares, item.price,
+                      extra={"메모": item.note} if item.note else None)
     return {"ok": True}
 
 
@@ -246,6 +265,10 @@ def place_order_api(req: OrderRequest):
             broker_error = str(e)
 
     db.add_trade(req.code, req.name, req.side, req.shares, req.price, req.note)
+    if req.side == "buy":
+        db.add_watchlist(req.code, req.name, market=req.market, exchange=req.exchange)
+    send_trade_alert(req.code, req.name, req.side, req.shares, req.price,
+                      extra={"메모": req.note} if req.note else None)
     return {"ok": True, "broker_result": broker_result, "broker_error": broker_error}
 
 

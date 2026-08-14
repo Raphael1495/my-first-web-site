@@ -52,3 +52,7 @@ def position_size(
 
 def stop_price(entry_price: float, atr_at_entry: float, params: StrategyParams) -> float:
     return entry_price - atr_at_entry * params.atr_stop_multiple
+
+
+def take_profit_price(entry_price: float, params: StrategyParams) -> float:
+    return entry_price * (1 + params.take_profit_pct)

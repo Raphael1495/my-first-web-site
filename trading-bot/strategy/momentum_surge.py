@@ -6,14 +6,16 @@ import pandas as pd
 
 @dataclass
 class SurgeParams:
-    change_pct_threshold: float = 7.0  # 전일 종가 대비 등락률(%) 이 값 이상이어야 진입
-    volume_multiple: float = 3.0  # 거래량이 최근 평균 대비 이 배수 이상이어야 진입
+    change_pct_threshold: float = 3.0  # 전일 종가 대비 등락률(%) 이 값 이상이어야 진입 (기존 7.0에서 완화)
+    volume_multiple: float = 1.5  # 거래량이 최근 평균 대비 이 배수 이상이어야 진입 (기존 3.0에서 완화)
     volume_avg_period: int = 20  # 평균 거래량 계산 기간(일)
-    min_trading_value: float = 5_000_000_000.0  # 최소 거래대금(원). 저유동성 종목 걸러내는 필터
+    min_trading_value: float = 5_000_000_000.0  # 최소 거래대금(원, 국내). 저유동성 종목 걸러내는 필터
+    min_trading_value_usd: float = 300_000.0  # 최소 거래대금(달러, 해외). 소형주도 걸리게 완화(기존 300만→30만)
     atr_period: int = 14
     atr_stop_multiple: float = 1.2  # 추세추종(2.0)보다 타이트한 손절 — 급등주는 변동성이 커서 빨리 끊어야 함
     risk_per_trade: float = 0.01  # 계좌 자산 대비 1건당 허용 손실 비율
     max_position_weight: float = 0.1  # 종목당 최대 비중 — 추세추종(0.2)보다 보수적으로
+    take_profit_pct: float = 0.05  # 종목당 익절 목표 — 진입가 대비 이만큼 오르면 그 자리에서 매도
 
 
 def compute_surge_signal(df: pd.DataFrame, params: SurgeParams) -> pd.DataFrame:
@@ -49,6 +51,10 @@ def compute_surge_signal(df: pd.DataFrame, params: SurgeParams) -> pd.DataFrame:
 
 def stop_price(entry_price: float, atr_at_entry: float, params: SurgeParams) -> float:
     return entry_price - atr_at_entry * params.atr_stop_multiple
+
+
+def take_profit_price(entry_price: float, params: SurgeParams) -> float:
+    return entry_price * (1 + params.take_profit_pct)
 
 
 def position_size(capital: float, entry_price: float, atr: float, params: SurgeParams) -> int:

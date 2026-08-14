@@ -20,6 +20,7 @@ PAPER_BASE_URL = "https://openapivts.koreainvestment.com:29443"
 
 TR_ID_PRICE = "FHKST01010100"  # 검증됨
 TR_ID_HOGA = "FHKST01010200"  # 미검증 (국내주식 현재가 호가/예상체결)
+TR_ID_PRICE_DETAIL = "FHPST01010000"  # 미검증 (국내주식 현재가 시세2 — 체결강도 등)
 TR_ID_BALANCE = {"real": "TTC8434R", "paper": "VTTC8434R"}  # 검증됨
 TR_ID_ORDER = {
     "real": {"buy": "TTC0802U", "sell": "TTC0801U"},
@@ -95,6 +96,19 @@ class KISBroker(Broker):
         )
         resp.raise_for_status()
         return resp.json()["output1"]
+
+    def get_execution_strength(self, symbol: str) -> float:
+        """체결강도(%) 조회 — 매수체결량/매도체결량*100. 100 이상이면 매수세가 매도세보다 우위.
+        ⚠️ 미검증 — 실전 사용 전 KIS Developers 포털에서 output 필드명(cttr)을 재확인할 것.
+        국내주식 전용 지표라 해외주식에는 대응 API가 없다."""
+        resp = requests.get(
+            f"{self.base_url}/uapi/domestic-stock/v1/quotations/inquire-price-2",
+            headers=self._headers(TR_ID_PRICE_DETAIL),
+            params={"FID_COND_MRKT_DIV_CODE": "J", "FID_INPUT_ISCD": symbol},
+            timeout=20,
+        )
+        resp.raise_for_status()
+        return float(resp.json()["output"]["cttr"])
 
     def _overseas_account_parts(self) -> tuple[str, str]:
         """해외주식 전용 계좌번호(KIS_OVERSEAS_ACCOUNT_NO)가 설정돼 있으면 그걸 쓰고,

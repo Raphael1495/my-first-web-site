@@ -164,6 +164,7 @@
             <div class="tab active" data-panel="holdings">보유종목</div>
             <div class="tab" data-panel="journal">매매일지</div>
             <div class="tab" data-panel="stockpnl">종목별 손익</div>
+            <button id="fx-toggle-btn" class="live-toggle-btn" onclick="toggleFxConvert()">환전</button>
             <button id="live-toggle-btn" class="live-toggle-btn" onclick="toggleLiveUpdates()">실시간 OFF</button>
           </div>
           <div id="pnl-summary" class="pnl-summary"></div>
@@ -171,7 +172,7 @@
 
         <div id="panel-holdings" class="panel active">
           <table>
-            <thead><tr><th>코드</th><th>이름</th><th>수량</th><th>평단가</th><th>등락률</th><th>메모</th></tr></thead>
+            <thead><tr><th>코드</th><th>이름</th><th>수량</th><th>등락률</th><th>평가손익</th><th>현재가격</th><th>매수가격</th><th>메모</th></tr></thead>
             <tbody id="holdings-body"></tbody>
           </table>
           <p class="muted">매매일지에 기록된 매수/매도 내역으로 자동 계산됩니다. 등락률은 매수평단가 대비 현재가 기준입니다.</p>
@@ -240,6 +241,8 @@ let bbSeries = {};
 let watchlistCache = [];
 let groupsCache = [];
 let holdingsCache = [];
+let fxRate = null;
+let fxConverted = false;
 let currentChartData = [];
 let currentInterval = '1d';
 let currentMarket = 'domestic';
@@ -533,21 +536,53 @@ async function loadWatchPrices() {
 
 async function loadHoldingPrices() {
   await Promise.allSettled(holdingsCache.map(async (i) => {
-    const el = document.getElementById(`hchg-${i.code}`);
-    if (!el) return;
+    const chgEl = document.getElementById(`hchg-${i.code}`);
+    const pnlEl = document.getElementById(`hpnl-${i.code}`);
+    const priceEl = document.getElementById(`hprice-${i.code}`);
+    if (!chgEl && !pnlEl && !priceEl) return;
     const market = /^\d+$/.test(i.code) ? 'domestic' : 'overseas';
     try {
       const res = await fetch(`/api/quote/${i.code}?market=${market}`);
-      if (!res.ok || !i.avg_price) { el.textContent = '-'; return; }
+      if (!res.ok || !i.avg_price) {
+        if (chgEl) chgEl.textContent = '-';
+        if (pnlEl) pnlEl.textContent = '-';
+        if (priceEl) priceEl.textContent = '-';
+        return;
+      }
       const q = await res.json();
       const pct = (q.price - i.avg_price) / i.avg_price * 100;
       const up = pct >= 0;
-      el.textContent = `${up ? '+' : ''}${pct.toFixed(2)}%`;
-      el.className = up ? 'buy' : 'sell';
+      if (chgEl) {
+        chgEl.textContent = `${up ? '+' : ''}${pct.toFixed(2)}%`;
+        chgEl.className = up ? 'buy' : 'sell';
+      }
+      if (pnlEl) {
+        const pnl = (q.price - i.avg_price) * i.shares;
+        pnlEl.dataset.market = market;
+        pnlEl.dataset.pnl = pnl;
+        renderPnlCell(pnlEl, pnl, market, up);
+      }
+      if (priceEl) {
+        priceEl.textContent = market === 'domestic' ? Math.round(q.price).toLocaleString() : q.price.toFixed(2);
+        priceEl.className = up ? 'buy' : 'sell';
+      }
     } catch {
-      el.textContent = '-';
+      if (chgEl) chgEl.textContent = '-';
+      if (pnlEl) pnlEl.textContent = '-';
+      if (priceEl) priceEl.textContent = '-';
     }
   }));
+}
+
+function renderPnlCell(pnlEl, pnl, market, up) {
+  if (market === 'domestic') {
+    pnlEl.textContent = `${up ? '+' : ''}${Math.round(pnl).toLocaleString()}원`;
+  } else if (fxConverted && fxRate) {
+    pnlEl.textContent = `${up ? '+' : ''}${Math.round(pnl * fxRate).toLocaleString()}원`;
+  } else {
+    pnlEl.textContent = `${up ? '+' : ''}$${pnl.toFixed(2)}`;
+  }
+  pnlEl.className = up ? 'buy' : 'sell';
 }
 
 async function removeWatch(code) {
@@ -573,10 +608,14 @@ async function refreshHoldings() {
   holdingsCache = items;
   document.getElementById('holdings-body').innerHTML = items.map(i => `
     <tr>
-      <td>${i.code}</td><td>${i.name}</td><td>${i.shares}</td><td>${Math.round(i.avg_price).toLocaleString()}</td>
-      <td id="hchg-${i.code}" class="muted">-</td><td>${i.note || ''}</td>
+      <td>${i.code}</td><td>${i.name}</td><td>${i.shares}</td>
+      <td id="hchg-${i.code}" class="muted">-</td>
+      <td id="hpnl-${i.code}" class="muted">-</td>
+      <td id="hprice-${i.code}" class="muted">-</td>
+      <td>${Math.round(i.avg_price).toLocaleString()}</td>
+      <td>${i.note || ''}</td>
     </tr>
-  `).join('') || '<tr><td colspan="6" class="muted">보유 중인 종목이 없습니다.</td></tr>';
+  `).join('') || '<tr><td colspan="8" class="muted">보유 중인 종목이 없습니다.</td></tr>';
   loadHoldingPrices();
 }
 
@@ -758,6 +797,38 @@ function toggleLiveUpdates() {
     btn.textContent = '실시간 ON';
     btn.classList.add('active');
   }
+}
+
+async function toggleFxConvert() {
+  const btn = document.getElementById('fx-toggle-btn');
+  if (fxConverted) {
+    fxConverted = false;
+    btn.classList.remove('active');
+    reRenderPnlCells();
+    return;
+  }
+  try {
+    const res = await fetch('/api/fxrate');
+    if (!res.ok) throw new Error('환율 조회 실패');
+    const data = await res.json();
+    fxRate = data.rate;
+  } catch {
+    alert('환율을 불러오지 못했습니다.');
+    return;
+  }
+  fxConverted = true;
+  btn.classList.add('active');
+  reRenderPnlCells();
+}
+
+function reRenderPnlCells() {
+  holdingsCache.forEach(i => {
+    const pnlEl = document.getElementById(`hpnl-${i.code}`);
+    if (!pnlEl || pnlEl.dataset.pnl === undefined) return;
+    const pnl = parseFloat(pnlEl.dataset.pnl);
+    const market = pnlEl.dataset.market;
+    renderPnlCell(pnlEl, pnl, market, pnl >= 0);
+  });
 }
 
 initChart();
