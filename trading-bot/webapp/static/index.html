@@ -612,7 +612,7 @@ async function refreshHoldings() {
       <td id="hchg-${i.code}" class="muted">-</td>
       <td id="hpnl-${i.code}" class="muted">-</td>
       <td id="hprice-${i.code}" class="muted">-</td>
-      <td>${Math.round(i.avg_price).toLocaleString()}</td>
+      <td>${/^\d+$/.test(i.code) ? Math.round(i.avg_price).toLocaleString() : i.avg_price.toFixed(2)}</td>
       <td>${i.note || ''}</td>
     </tr>
   `).join('') || '<tr><td colspan="8" class="muted">보유 중인 종목이 없습니다.</td></tr>';
