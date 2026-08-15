@@ -16,6 +16,9 @@ class SurgeParams:
     risk_per_trade: float = 0.01  # 계좌 자산 대비 1건당 허용 손실 비율
     max_position_weight: float = 0.1  # 종목당 최대 비중 — 추세추종(0.2)보다 보수적으로
     take_profit_pct: float = 0.05  # 종목당 익절 목표 — 진입가 대비 이만큼 오르면 그 자리에서 매도
+    ma_period: int = 20  # 이격도 계산 기준 이동평균선 기간
+    max_ma_deviation_pct: float = 25.0  # 20일선 대비 이만큼(%) 넘게 떠 있으면 "이미 너무 늘어난" 걸로 보고 진입 안 함
+    # (오늘 하루 만에 급등한 경우도 그 시점 종가가 이미 반영되므로 똑같이 걸러진다)
 
 
 def compute_surge_signal(df: pd.DataFrame, params: SurgeParams) -> pd.DataFrame:
@@ -41,10 +44,14 @@ def compute_surge_signal(df: pd.DataFrame, params: SurgeParams) -> pd.DataFrame:
     ).max(axis=1)
     out["atr"] = tr.rolling(params.atr_period).mean()
 
+    ma = out["Close"].rolling(params.ma_period).mean()
+    out["ma_deviation_pct"] = (out["Close"] - ma) / ma * 100
+
     out["surge_entry"] = (
         (out["change_pct"] >= params.change_pct_threshold)
         & (out["volume_ratio"] >= params.volume_multiple)
         & (out["trading_value"] >= params.min_trading_value)
+        & (out["ma_deviation_pct"] <= params.max_ma_deviation_pct)
     )
     return out
 

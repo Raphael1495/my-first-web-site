@@ -293,10 +293,12 @@ def _process_surge(broker, symbol: str, balance: dict, equity: float, open_count
     shares = surge_position_size(equity, last["Close"], last["atr"], params)
     if shares > 0:
         print(f"[급등주 매수] {symbol} {shares}주 @ {last['Close']:,.0f} "
-              f"(등락률 {last['change_pct']:+.1f}%, 거래량 {last['volume_ratio']:.1f}배)")
+              f"(등락률 {last['change_pct']:+.1f}%, 거래량 {last['volume_ratio']:.1f}배, "
+              f"이격도 {last['ma_deviation_pct']:+.1f}%)")
         broker.place_order(code, "buy", shares)
         _record_trade(code, symbol, "buy", shares, last["Close"], note="auto:surge",
-                      extra={"등락률": f"{last['change_pct']:+.1f}%", "거래량": f"{last['volume_ratio']:.1f}배"})
+                      extra={"등락률": f"{last['change_pct']:+.1f}%", "거래량": f"{last['volume_ratio']:.1f}배",
+                             "이격도": f"{last['ma_deviation_pct']:+.1f}%"})
         return 1
     return 0
 
@@ -360,9 +362,11 @@ def _process_surge_overseas(broker, symbol: str, exchange: str, balance: dict, e
     if shares > 0:
         session_tag = f" [{session}]" if session else ""
         print(f"[급등주-해외 매수]{session_tag} {symbol} {shares}주 @ ${fill_price:,.2f} "
-              f"(등락률 {last['change_pct']:+.1f}%, 거래량 {last['volume_ratio']:.1f}배)")
+              f"(등락률 {last['change_pct']:+.1f}%, 거래량 {last['volume_ratio']:.1f}배, "
+              f"이격도 {last['ma_deviation_pct']:+.1f}%)")
         broker.place_order_overseas(symbol, "buy", shares, fill_price, exchange)
-        extra = {"등락률": f"{last['change_pct']:+.1f}%", "거래량": f"{last['volume_ratio']:.1f}배"}
+        extra = {"등락률": f"{last['change_pct']:+.1f}%", "거래량": f"{last['volume_ratio']:.1f}배",
+                 "이격도": f"{last['ma_deviation_pct']:+.1f}%"}
         if session:
             extra["세션"] = session
         _record_trade(symbol, symbol, "buy", shares, fill_price, note="auto:surge", extra=extra)
@@ -639,12 +643,12 @@ def cmd_live_surge(symbols: list | None = None, symbols_us: list | None = None,
     멈추고, 당일 이 전략으로 산 포지션을 전량 강제청산한다 — 오버나이트 리스크를 피하는
     데이트레이딩 스타일이라서. 국내/해외 동시보유 한도는 각자 따로 적용된다."""
     from broker.kis import KISBroker
-    from data.screener import fetch_us_day_gainers
+    from data.screener import fetch_us_surge_candidates
     from webapp.overseas_symbols import SYMBOLS as OVERSEAS_SYMBOLS
 
     symbols = symbols if symbols is not None else CONFIG.surge_symbols
     if symbols_us is None:
-        dynamic = fetch_us_day_gainers()
+        dynamic = fetch_us_surge_candidates()
         symbols_us = list(dict.fromkeys(list(CONFIG.surge_symbols_us) + dynamic))
         if dynamic:
             print(f"[급등주-해외] 오늘의 급등주 스크리너 {len(dynamic)}종목 추가 스캔: {dynamic}")

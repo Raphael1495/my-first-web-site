@@ -216,10 +216,11 @@ def buy_phase(symbols, equity, max_positions, position_mode: dict, position_symb
             continue
         if kr_close if domestic else us_close:
             continue  # 매도 시점 지났으면 신규 진입 안 함
+        surge_p = surge_params_for(symbol, surge_params) if surge_params is not None else None
         try:
             trend_last = compute_indicators(load_history(symbol, period="1y"), CONFIG.strategy).iloc[-1] \
                 if (both_mode or trend_mode or (surge_params is None and reversion_params is None)) else None
-            surge_last = compute_surge_signal(load_history(symbol, period="6mo"), surge_params_for(symbol, surge_params)).iloc[-1] \
+            surge_last = compute_surge_signal(load_history(symbol, period="6mo"), surge_p).iloc[-1] \
                 if (both_mode or surge_params is not None) else None
             reversion_last = compute_reversion_signal(load_history(symbol, period="1y"), reversion_params).iloc[-1] \
                 if reversion_params is not None else None
@@ -230,12 +231,22 @@ def buy_phase(symbols, equity, max_positions, position_mode: dict, position_symb
         trend_ok = trend_last is not None and bool(trend_last["golden_cross"])
         surge_ok = surge_last is not None and bool(surge_last["surge_entry"])
         reversion_ok = reversion_last is not None and bool(reversion_last["reversion_entry"])
+        # 등락률/거래량/유동성은 다 맞는데 이미 너무 늘어나서(이격도 과다) 걸러진 경우 —
+        # 신호가 아예 없는 것과 구분해서 보여준다.
+        surge_overextended = (
+            surge_last is not None and not surge_ok
+            and surge_last["change_pct"] >= surge_p.change_pct_threshold
+            and surge_last["volume_ratio"] >= surge_p.volume_multiple
+            and surge_last["trading_value"] >= surge_p.min_trading_value
+            and surge_last["ma_deviation_pct"] > surge_p.max_ma_deviation_pct
+        )
 
         if trend_ok:
             last, mode, mode_tag = trend_last, "trend", "골든크로스"
         elif surge_ok:
             last, mode, mode_tag = surge_last, "surge", \
-                f"급등(등락 {surge_last['change_pct']:+.1f}%, 거래량 {surge_last['volume_ratio']:.1f}배)"
+                f"급등(등락 {surge_last['change_pct']:+.1f}%, 거래량 {surge_last['volume_ratio']:.1f}배, " \
+                f"이격도 {surge_last['ma_deviation_pct']:+.1f}%)"
         elif reversion_ok:
             last, mode, mode_tag = reversion_last, "reversion", \
                 f"이평선회귀(이격도 {reversion_last['deviation_pct']:+.1f}%, ⚠️체결강도 미확인-모의투자라 생략)"
@@ -244,7 +255,11 @@ def buy_phase(symbols, equity, max_positions, position_mode: dict, position_symb
             mode, mode_tag = None, None
 
         if not (trend_ok or surge_ok or reversion_ok):
-            print(f"  [관찰] {symbol} {last['Close']:,.2f}{unit} - 신호 없음")
+            if surge_overextended:
+                print(f"  [건너뜀:과열] {symbol} {last['Close']:,.2f}{unit} - 등락/거래량 조건 충족했지만 "
+                      f"이격도 {surge_last['ma_deviation_pct']:+.1f}% > {surge_p.max_ma_deviation_pct:.0f}% (이미 과열)")
+            else:
+                print(f"  [관찰] {symbol} {last['Close']:,.2f}{unit} - 신호 없음")
             continue
         if open_count >= max_positions:
             print(f"  [건너뜀] {symbol} - 동시보유 한도({max_positions}) 도달")
@@ -316,9 +331,9 @@ def main():
     end_time = parse_end_time(argv[0] if len(argv) > 0 else "23:30")
     poll_minutes = int(argv[1]) if len(argv) > 1 else 5
     if surge_mode or both_mode:
-        from data.screener import fetch_us_day_gainers
+        from data.screener import fetch_us_surge_candidates
 
-        dynamic = fetch_us_day_gainers()
+        dynamic = fetch_us_surge_candidates()
         default_symbols = list(dict.fromkeys(list(CONFIG.surge_symbols_us) + dynamic))
         if dynamic:
             print(f"[dry_run_cycle] 오늘의 급등주 스크리너 {len(dynamic)}종목 추가: {dynamic}")
