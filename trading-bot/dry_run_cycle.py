@@ -192,12 +192,15 @@ def sell_phase(position_mode: dict, position_symbol: dict, surge_params, reversi
 
 
 def buy_phase(symbols, equity, max_positions, position_mode: dict, position_symbol: dict,
-              surge_params=None, both_mode=False, reversion_params=None, position_entry_bar: dict | None = None):
+              surge_params=None, both_mode=False, reversion_params=None, position_entry_bar: dict | None = None,
+              trend_mode=False):
     """surge_params가 주어지면 골든크로스 대신 급등주 신호로 매수한다.
     both_mode=True면 종목마다 골든크로스/급등주 신호를 둘 다 체크해서, 골든크로스를 우선으로
     (없으면 급등주 신호로) 산다 — 우량주와 급등주를 같은 사이클에서 섞어 돌릴 때 쓴다.
     reversion_params가 주어지면 이평선 대비 이격도 조건으로 매수한다 — ⚠️ 체결강도 조건은
-    실시간 KIS API 없이는 확인 불가라 모의투자에선 생략한다(실거래에서만 추가로 검사됨)."""
+    실시간 KIS API 없이는 확인 불가라 모의투자에선 생략한다(실거래에서만 추가로 검사됨).
+    trend_mode=True면 surge_params/reversion_params 조합과 무관하게 골든크로스 체크도 같이
+    켠다 (예: 골든크로스+이평선회귀만 섞고 급등주는 빼고 싶을 때 --reversion과 같이 쓴다)."""
     from main import _is_kr_near_close, _is_us_near_close
 
     kr_close = _is_kr_near_close()
@@ -215,7 +218,7 @@ def buy_phase(symbols, equity, max_positions, position_mode: dict, position_symb
             continue  # 매도 시점 지났으면 신규 진입 안 함
         try:
             trend_last = compute_indicators(load_history(symbol, period="1y"), CONFIG.strategy).iloc[-1] \
-                if (both_mode or (surge_params is None and reversion_params is None)) else None
+                if (both_mode or trend_mode or (surge_params is None and reversion_params is None)) else None
             surge_last = compute_surge_signal(load_history(symbol, period="6mo"), surge_params_for(symbol, surge_params)).iloc[-1] \
                 if (both_mode or surge_params is not None) else None
             reversion_last = compute_reversion_signal(load_history(symbol, period="1y"), reversion_params).iloc[-1] \
@@ -307,7 +310,8 @@ def main():
     surge_mode = "--surge" in argv
     both_mode = "--both" in argv
     reversion_mode = "--reversion" in argv
-    argv = [a for a in argv if a not in ("--surge", "--both", "--reversion")]
+    trend_mode = "--trend" in argv
+    argv = [a for a in argv if a not in ("--surge", "--both", "--reversion", "--trend")]
 
     end_time = parse_end_time(argv[0] if len(argv) > 0 else "23:30")
     poll_minutes = int(argv[1]) if len(argv) > 1 else 5
@@ -318,6 +322,8 @@ def main():
         default_symbols = list(dict.fromkeys(list(CONFIG.surge_symbols_us) + dynamic))
         if dynamic:
             print(f"[dry_run_cycle] 오늘의 급등주 스크리너 {len(dynamic)}종목 추가: {dynamic}")
+    elif reversion_mode and trend_mode:
+        default_symbols = list(CONFIG.reversion_symbols_us)
     elif reversion_mode:
         default_symbols = list(CONFIG.reversion_symbols)
     else:
@@ -333,13 +339,14 @@ def main():
 
     active_strategies = [
         label for flag, label in (
-            (not surge_mode and not both_mode and not reversion_mode, "골든크로스"),
+            (not surge_mode and not both_mode and not reversion_mode and not trend_mode, "골든크로스"),
             (both_mode, "골든크로스+급등주"),
             (surge_mode and not both_mode, "급등주"),
             (reversion_mode, "이평선회귀"),
+            (trend_mode and not both_mode, "골든크로스"),
         ) if flag
     ]
-    mode_label = "+".join(active_strategies)
+    mode_label = "+".join(dict.fromkeys(active_strategies))
     print(f"[dry_run_cycle] {end_time.strftime('%Y-%m-%d %H:%M')}까지, {poll_minutes}분마다 재확인 ({mode_label} 전략)")
     print(f"[dry_run_cycle] 대상 {len(symbols)}종목({symbols}), 명목자본 {equity:,.2f}, 동시보유 한도 {max_positions}")
     if reversion_mode:
@@ -373,7 +380,7 @@ def main():
                    position_entry_bar=position_entry_bar)
         buy_phase(symbols, equity, max_positions, position_mode, position_symbol,
                   surge_params=surge_params, both_mode=both_mode, reversion_params=reversion_params,
-                  position_entry_bar=position_entry_bar)
+                  position_entry_bar=position_entry_bar, trend_mode=trend_mode)
 
         wait_until = min(datetime.now() + timedelta(minutes=poll_minutes), end_time)
         while datetime.now() < wait_until:

@@ -297,8 +297,8 @@ def get_holdings():
 
 
 @app.get("/api/trades/stats")
-def get_trade_stats():
-    return db.compute_trade_stats()
+def get_trade_stats(market: str = "all"):
+    return db.compute_trade_stats(market)
 
 
 class BacktestRequest(BaseModel):

@@ -185,9 +185,15 @@ def compute_holdings() -> list:
     return [p for p in positions.values() if p["shares"] > 0]
 
 
-def compute_trade_stats() -> dict:
-    """평단가 기준으로 매도 시점마다 실현손익을 계산해 요약 통계를 낸다."""
+def compute_trade_stats(market: str = "all") -> dict:
+    """평단가 기준으로 매도 시점마다 실현손익을 계산해 요약 통계를 낸다.
+    market="domestic"/"overseas"로 필터링하면 그 시장 종목만으로 계산한다 — 국내(원화)와
+    해외(달러) 손익을 그냥 합치면 통화가 섞여서 의미 없는 숫자가 되기 때문에 필요하다."""
     trades = sorted(list_trades(), key=lambda t: t["traded_at"])
+    if market == "domestic":
+        trades = [t for t in trades if t["code"].isdigit()]
+    elif market == "overseas":
+        trades = [t for t in trades if not t["code"].isdigit()]
     positions: dict[str, dict] = {}
     realized: list[dict] = []
     for t in trades:

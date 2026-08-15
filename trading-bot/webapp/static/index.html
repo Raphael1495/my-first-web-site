@@ -255,6 +255,7 @@ function setMarket(market, btnEl) {
   searchInput.value = '';
   searchResults.style.display = 'none';
   saveSettings();
+  refreshPnlSummary();
 }
 
 function initChart() {
@@ -574,15 +575,23 @@ async function loadHoldingPrices() {
   }));
 }
 
-function renderPnlCell(pnlEl, pnl, market, up) {
+function formatPnl(pnl, market) {
+  const up = pnl >= 0;
+  let text;
   if (market === 'domestic') {
-    pnlEl.textContent = `${up ? '+' : ''}${Math.round(pnl).toLocaleString()}원`;
+    text = `${up ? '+' : ''}${Math.round(pnl).toLocaleString()}원`;
   } else if (fxConverted && fxRate) {
-    pnlEl.textContent = `${up ? '+' : ''}${Math.round(pnl * fxRate).toLocaleString()}원`;
+    text = `${up ? '+' : ''}${Math.round(pnl * fxRate).toLocaleString()}원`;
   } else {
-    pnlEl.textContent = `${up ? '+' : ''}$${pnl.toFixed(2)}`;
+    text = `${up ? '+' : ''}$${pnl.toFixed(2)}`;
   }
-  pnlEl.className = up ? 'buy' : 'sell';
+  return { text, cls: up ? 'buy' : 'sell' };
+}
+
+function renderPnlCell(pnlEl, pnl, market, up) {
+  const { text, cls } = formatPnl(pnl, market);
+  pnlEl.textContent = text;
+  pnlEl.className = cls;
 }
 
 async function removeWatch(code) {
@@ -639,20 +648,23 @@ async function refreshJournal() {
 }
 
 async function refreshPnlSummary() {
-  const res = await fetch('/api/trades/stats');
+  const res = await fetch(`/api/trades/stats?market=${currentMarket}`);
   const s = await res.json();
-  const up = s.total_realized_pnl >= 0;
+  const total = formatPnl(s.total_realized_pnl, currentMarket);
   document.getElementById('pnl-summary').innerHTML = `
-    <div class="pnl-stat"><div class="label">누적 실현손익</div><div class="value ${up ? 'up' : 'down'}">${up ? '+' : ''}${Math.round(s.total_realized_pnl).toLocaleString()}원</div></div>
+    <div class="pnl-stat"><div class="label">누적 실현손익</div><div class="value ${total.cls === 'buy' ? 'up' : 'down'}">${total.text}</div></div>
     <div class="pnl-stat"><div class="label">매도 승률</div><div class="value">${s.win_rate}% <span class="muted">(${s.sell_count}건)</span></div></div>
   `;
-  document.getElementById('stockpnl-body').innerHTML = s.by_stock.map(b => `
+  document.getElementById('stockpnl-body').innerHTML = s.by_stock.map(b => {
+    const p = formatPnl(b.pnl, currentMarket);
+    return `
     <tr>
       <td>${b.code}</td><td>${b.name}</td>
-      <td class="${b.pnl >= 0 ? 'buy' : 'sell'}">${b.pnl >= 0 ? '+' : ''}${Math.round(b.pnl).toLocaleString()}</td>
+      <td class="${p.cls}">${p.text}</td>
       <td class="${b.pct >= 0 ? 'buy' : 'sell'}">${b.pct >= 0 ? '+' : ''}${b.pct}%</td>
       <td>${b.count}</td>
-    </tr>`).join('') || '<tr><td colspan="5" class="muted">매도 기록이 없습니다.</td></tr>';
+    </tr>`;
+  }).join('') || '<tr><td colspan="5" class="muted">매도 기록이 없습니다.</td></tr>';
 }
 
 async function addTrade() {
@@ -780,8 +792,30 @@ async function restoreSettings() {
 // 값이 주기적으로 다시 그려지며 초기화되는 일이 없다.
 let liveUpdateTimer = null;
 
+async function refreshChartData() {
+  if (!currentSymbol) return;
+  const res = await fetch(`/api/chart/${currentSymbol.code}?interval=${currentInterval}&market=${currentSymbol.market}`);
+  if (!res.ok) return;
+  const data = await res.json();
+  currentChartData = data;
+  series.setData(data);
+  updateIndicators();
+
+  const unit = currentSymbol.market === 'overseas' ? '$' : '원';
+  if (data.length >= 2) {
+    const last = data[data.length - 1], prev = data[data.length - 2];
+    const diff = last.close - prev.close;
+    const pct = (diff / prev.close * 100).toFixed(2);
+    const up = diff >= 0;
+    document.getElementById('price-now').textContent = Math.round(last.close).toLocaleString() + unit;
+    const chEl = document.getElementById('price-change');
+    chEl.textContent = `${up ? '▲' : '▼'} ${Math.abs(diff).toLocaleString()} (${up ? '+' : ''}${pct}%)`;
+    chEl.className = 'change ' + (up ? 'up' : 'down');
+  }
+}
+
 async function runLiveUpdate() {
-  await Promise.all([refreshHoldings(), refreshJournal(), loadWatchPrices()]);
+  await Promise.all([refreshHoldings(), refreshJournal(), loadWatchPrices(), refreshChartData()]);
 }
 
 function toggleLiveUpdates() {
@@ -805,6 +839,7 @@ async function toggleFxConvert() {
     fxConverted = false;
     btn.classList.remove('active');
     reRenderPnlCells();
+    refreshPnlSummary();
     return;
   }
   try {
@@ -819,6 +854,7 @@ async function toggleFxConvert() {
   fxConverted = true;
   btn.classList.add('active');
   reRenderPnlCells();
+  refreshPnlSummary();
 }
 
 function reRenderPnlCells() {
