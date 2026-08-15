@@ -44,9 +44,12 @@
   #chart { border: 1px solid #e2e4e9; border-radius: 8px; overflow: hidden; background: #fff; flex: 1; min-height: 0; }
   .panel.active thead th { position: sticky; top: 0; background: #fff; }
 
-  .dash-row { display: flex; gap: 20px; align-items: stretch; flex: 1; min-height: 0; padding-top: 4px; }
-  .chart-col { flex: 0 0 60%; max-width: 60%; min-width: 0; display: flex; flex-direction: column; min-height: 0; }
-  .side-col { flex: 0 0 40%; max-width: 40%; min-width: 0; display: flex; flex-direction: column; min-height: 0; }
+  .dash-row { display: flex; align-items: stretch; flex: 1; min-height: 0; padding-top: 4px; }
+  .chart-col { flex: 0 0 auto; width: 60%; min-width: 280px; max-width: 80%; display: flex; flex-direction: column; min-height: 0; }
+  .col-resizer { flex: 0 0 14px; margin: 0 3px; cursor: col-resize; position: relative; }
+  .col-resizer::after { content: ''; position: absolute; top: 0; bottom: 0; left: 50%; width: 2px; margin-left: -1px; background: #e2e4e9; border-radius: 1px; }
+  .col-resizer:hover::after, .col-resizer.dragging::after { background: #3169d6; }
+  .side-col { flex: 1 1 0; min-width: 240px; max-width: none; display: flex; flex-direction: column; min-height: 0; }
   .col-header { flex: 0 0 auto; }
   .col-header .pnl-summary,
   .col-header .tabs { margin-bottom: 8px; }
@@ -157,6 +160,8 @@
         </div>
         <div id="chart"></div>
       </div>
+
+      <div class="col-resizer" id="col-resizer"></div>
 
       <div class="side-col">
         <div class="col-header">
@@ -755,6 +760,7 @@ function saveSettings() {
       bb: document.getElementById('bb-toggle').checked,
     },
     lastSymbol: currentSymbol,
+    colSplit: document.querySelector('.chart-col').style.width || null,
   }));
 }
 
@@ -773,6 +779,9 @@ async function restoreSettings() {
     if (s.market && s.market !== currentMarket) {
       const btn = document.querySelector(`.market-btn[data-market="${s.market}"]`);
       if (btn) setMarket(s.market, btn);
+    }
+    if (s.colSplit) {
+      document.querySelector('.chart-col').style.width = s.colSplit;
     }
     if (s.interval) {
       const btn = document.querySelector(`.tf-btn[data-interval="${s.interval}"]`);
@@ -867,7 +876,38 @@ function reRenderPnlCells() {
   });
 }
 
+function initColResizer() {
+  const resizer = document.getElementById('col-resizer');
+  const chartCol = document.querySelector('.chart-col');
+  const dashRow = document.querySelector('.dash-row');
+  let dragging = false;
+
+  resizer.addEventListener('mousedown', (e) => {
+    dragging = true;
+    resizer.classList.add('dragging');
+    document.body.style.userSelect = 'none';
+    e.preventDefault();
+  });
+
+  window.addEventListener('mousemove', (e) => {
+    if (!dragging) return;
+    const rect = dashRow.getBoundingClientRect();
+    let pct = (e.clientX - rect.left) / rect.width * 100;
+    pct = Math.max(30, Math.min(80, pct));
+    chartCol.style.width = pct.toFixed(2) + '%';
+  });
+
+  window.addEventListener('mouseup', () => {
+    if (!dragging) return;
+    dragging = false;
+    resizer.classList.remove('dragging');
+    document.body.style.userSelect = '';
+    saveSettings();
+  });
+}
+
 initChart();
+initColResizer();
 restoreSettings();
 refreshGroups().then(refreshWatchlist);
 refreshHoldings();
