@@ -48,6 +48,12 @@ def find_entry_signal(df: pd.DataFrame, params: IntradayParams) -> dict | None:
     if len(df) < params.lookback_minutes // 2:
         return None
 
+    # yfinance가 주는 마지막 봉은 아직 다 안 끝난(형성 중인) 분봉이라 거래량이 항상 0으로
+    # 찍힌다 — 그대로 두면 "거래량 유입" 조건이 절대 만족될 수 없어 매수 신호가 영영 안 나온다.
+    # 완결된 마지막 봉을 기준으로 판단하도록 미완성 봉은 제외한다.
+    if len(df) >= 2 and df.iloc[-1]["Volume"] == 0:
+        df = df.iloc[:-1]
+
     recent = df.tail(params.lookback_minutes)
     high_idx = recent["High"].idxmax()
     recent_high = recent.loc[high_idx, "High"]
