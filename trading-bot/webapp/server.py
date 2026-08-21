@@ -235,6 +235,14 @@ def get_trades():
     return db.list_trades_with_pnl()
 
 
+@app.delete("/api/trades/test")
+def delete_test_trades():
+    """테스트(auto_test:) 매매기록만 지운다. 실전/모의 실계좌 기록(auto:live, auto:surge 등)은
+    건드리지 않는다."""
+    deleted = db.delete_test_trades()
+    return {"ok": True, "deleted": deleted}
+
+
 @app.post("/api/trades")
 def post_trades(item: TradeItem):
     if item.side not in ("buy", "sell"):

@@ -170,6 +170,7 @@
             <div class="tab" data-panel="journal">매매일지</div>
             <div class="tab" data-panel="stockpnl">종목별 손익</div>
             <button id="fx-toggle-btn" class="live-toggle-btn" onclick="toggleFxConvert()">환전</button>
+            <button id="delete-test-btn" class="live-toggle-btn" onclick="deleteTestTrades()">종목삭제</button>
             <button id="live-toggle-btn" class="live-toggle-btn" onclick="toggleLiveUpdates()">실시간 OFF</button>
           </div>
           <div id="pnl-summary" class="pnl-summary"></div>
@@ -840,6 +841,15 @@ function toggleLiveUpdates() {
     btn.textContent = '실시간 ON';
     btn.classList.add('active');
   }
+}
+
+async function deleteTestTrades() {
+  if (!confirm('테스트 매매기록(auto_test:)을 전부 삭제할까요? 보유종목/매매일지/종목별손익에서 다 같이 지워집니다.\n실전/모의 실계좌 기록(auto:live, auto:surge)은 지워지지 않습니다.')) return;
+  const res = await fetch('/api/trades/test', { method: 'DELETE' });
+  const data = await res.json();
+  await refreshHoldings();
+  await refreshJournal();
+  alert(`테스트 매매기록 ${data.deleted}건 삭제했습니다.`);
 }
 
 async function toggleFxConvert() {

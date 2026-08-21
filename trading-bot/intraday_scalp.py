@@ -26,10 +26,26 @@ NOTE = "auto_test:intraday"
 PARAMS = IntradayParams()
 
 _US_NAME = {s["code"]: s["name"] for s in _OVERSEAS_SYMBOLS}
+_name_cache: dict = {}
 
 
 def lookup_name(code: str) -> str:
-    return _US_NAME.get(code, code)
+    """큐레이션 목록(대형주 위주)에 없는 종목은 스크리너로 새로 걸려든 것들이라,
+    야후 파이낸스에서 실제 회사명을 받아온다. 실패하면 코드 그대로 쓴다."""
+    if code in _US_NAME:
+        return _US_NAME[code]
+    if code in _name_cache:
+        return _name_cache[code]
+    try:
+        import yfinance as yf
+
+        info = yf.Ticker(code).get_info()
+        name = info.get("shortName") or info.get("longName") or code
+        name = name.replace(", Inc.", "").replace(" Inc.", "").replace(" Inc", "").strip()
+    except Exception:
+        name = code
+    _name_cache[code] = name
+    return name
 
 
 def parse_end_time(hhmm: str) -> datetime:
@@ -41,11 +57,50 @@ def parse_end_time(hhmm: str) -> datetime:
     return end
 
 
+VOLUME_SURGE_THRESHOLD_PCT = 200.0  # 어제 대비 오늘 거래량이 이만큼(%) 이상 늘어야 "터졌다"고 봄 (3배 이상)
+MIN_TODAY_VALUE_USD = 10_000_000.0  # 오늘 거래대금(거래량×종가) 최소치. BVC처럼 비율(+2,368%)만 크고
+                                     # 실제 거래량은 118K주(전일 4,800주)뿐이던 초저유동성 종목을 걸러낸다
+
+
+def _passes_surge_filters(symbol: str) -> tuple[bool, dict | None]:
+    """세 조건을 모두 만족해야 통과: ① 거래량 전일 대비 +200%(3배) 이상 ② 오늘 거래대금
+    1,000만$ 이상(실제로도 유동성이 커야 함, 비율만 큰 소형주 배제) ③ 주가는 상승(하락은 배제).
+    데이터를 못 받으면 통과시키지 않는다(보수적으로 배제)."""
+    try:
+        df = load_history(symbol, period="5d", interval="1d")
+    except Exception:
+        return False, None
+    if len(df) < 2:
+        return False, None
+
+    yesterday_vol = df["Volume"].iloc[-2]
+    today_vol = df["Volume"].iloc[-1]
+    today_close = df["Close"].iloc[-1]
+    yesterday_close = df["Close"].iloc[-2]
+    if yesterday_vol <= 0 or yesterday_close <= 0:
+        return False, None
+
+    vol_change_pct = (today_vol - yesterday_vol) / yesterday_vol * 100
+    price_change_pct = (today_close - yesterday_close) / yesterday_close * 100
+    today_value = today_vol * today_close
+
+    info = {"vol_change_pct": vol_change_pct, "price_change_pct": price_change_pct, "today_value": today_value}
+    passed = (
+        vol_change_pct >= VOLUME_SURGE_THRESHOLD_PCT
+        and today_value >= MIN_TODAY_VALUE_USD
+        and price_change_pct > 0
+    )
+    return passed, info
+
+
 def pick_top_candidates(top_n: int) -> list[str]:
-    """급등주 후보군(스크리너+큐레이션)을 오늘 실시간 등락률로 정렬해서 상위 top_n개를 고른다."""
+    """그날 시장 스크리너(day_gainers/small_cap_gainers/most_actives/aggressive_small_caps)로
+    후보를 매번 새로 스캔한다 — 특정 종목을 미리 고정해두지 않는다. 오늘 실시간 등락률로
+    정렬한 뒤, 등락률 상위권 중 거래량 급증 + 충분한 유동성 + 상승 종목(_passes_surge_filters)만
+    top_n개 고른다."""
     from data.screener import fetch_us_surge_candidates
 
-    universe = list(dict.fromkeys(list(CONFIG.surge_symbols_us) + fetch_us_surge_candidates()))
+    universe = fetch_us_surge_candidates()
     ranked = []
     for symbol in universe:
         try:
@@ -57,8 +112,24 @@ def pick_top_candidates(top_n: int) -> list[str]:
         except Exception:
             continue
     ranked.sort(key=lambda x: x[1], reverse=True)
-    top = ranked[:top_n]
-    print(f"[intraday_scalp] 후보 {len(universe)}종목 중 오늘 등락률 상위 {len(top)}개: "
+
+    # 전체 후보군을 다 확인하면 느리니, 등락률 상위권(top_n의 4배)만 검사한다.
+    shortlist = ranked[: top_n * 4]
+    top = []
+    excluded = []
+    for symbol, pct in shortlist:
+        if len(top) >= top_n:
+            break
+        passed, info = _passes_surge_filters(symbol)
+        if not passed:
+            excluded.append(symbol)
+            continue
+        top.append((symbol, pct))
+
+    if excluded:
+        print(f"[intraday_scalp] 조건(거래량 +{VOLUME_SURGE_THRESHOLD_PCT:.0f}%, 거래대금 "
+              f"${MIN_TODAY_VALUE_USD:,.0f}+, 상승) 미달로 제외: {excluded}")
+    print(f"[intraday_scalp] 스크리너 후보 {len(universe)}종목 중 조건 충족 {len(top)}개: "
           f"{[(s, round(p, 1)) for s, p in top]}")
     return [s for s, _ in top]
 

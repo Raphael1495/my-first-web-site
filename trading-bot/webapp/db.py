@@ -142,6 +142,18 @@ def list_trades() -> list:
     return [dict(r) for r in rows]
 
 
+def delete_test_trades() -> int:
+    """note가 'auto_test:'로 시작하는 테스트 매매기록을 전부 지운다 (실전/모의 실계좌 주문인
+    'auto:live', 'auto:surge' 등은 절대 안 건드림). 보유종목/매매일지/종목별손익은 전부
+    trades 테이블에서 계산되므로, 이 삭제 하나로 세 화면이 다 같이 정리된다."""
+    conn = get_conn()
+    cur = conn.execute("DELETE FROM trades WHERE note LIKE 'auto_test:%'")
+    deleted = cur.rowcount
+    conn.commit()
+    conn.close()
+    return deleted
+
+
 def list_trades_with_pnl() -> list:
     """매매일지 표시용: 매도 행에는 그 시점 매수평단가와 등락률을 같이 계산해 붙여준다."""
     trades = sorted(list_trades(), key=lambda t: t["traded_at"])

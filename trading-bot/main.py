@@ -636,6 +636,82 @@ def cmd_live_dry_run(
             print(f"[건너뜀] {symbol} {last['Close']:,.2f}{unit} ({chg_str}) - 골든크로스지만 계산된 매수수량이 0")
 
 
+def cmd_live_reversion_dry_run(
+    symbols: list | None = None,
+    max_positions: int | None = None,
+    capital: float | None = None,
+    note: str = "auto_test:reversion",
+):
+    """브로커(KIS) 연결 없이, 매매일지(webapp/app.db)만으로 이평선회귀 전략을 시뮬레이션한다.
+    체결강도(실시간 API 전용 지표)는 dry-run에선 확인할 수 없어서, 실거래(cmd_live_reversion)와
+    달리 이격도 조건만으로 진입한다."""
+    from strategy.mean_reversion import compute_indicators as compute_reversion_signal
+    from strategy.mean_reversion import position_size as reversion_position_size
+    from strategy.mean_reversion import stop_price as reversion_stop_price
+    from strategy.mean_reversion import take_profit_price as reversion_take_profit_price
+    from webapp import db
+
+    symbols = symbols if symbols is not None else CONFIG.reversion_symbols
+    max_positions = max_positions if max_positions is not None else CONFIG.risk.max_open_positions_reversion
+    equity = capital if capital is not None else CONFIG.initial_capital
+    params = CONFIG.reversion
+
+    holdings = {p["code"]: p for p in db.compute_holdings()}
+    open_count = len(holdings)
+    kr_near_close = _is_kr_near_close()
+
+    print(f"[이평회귀 모의 스캔] {len(symbols)}개 종목, 명목자본 {equity:,.0f} 기준, "
+          f"동시보유 한도 {max_positions}종목 (현재 {open_count}종목 보유 중) | 국내 마감임박={kr_near_close}")
+
+    for symbol in symbols:
+        code = symbol.split(".")[0]
+        try:
+            hist = compute_reversion_signal(load_history(symbol, period="1y"), params)
+        except Exception as e:
+            print(f"[에러] {symbol}: {e}")
+            continue
+        last = hist.iloc[-1]
+        prev = hist.iloc[-2]
+        chg_pct = (last["Close"] - prev["Close"]) / prev["Close"] * 100 if prev["Close"] else 0.0
+        chg_str = f"{chg_pct:+.2f}%"
+        held = holdings.get(code)
+
+        if held:
+            stop = reversion_stop_price(held["avg_price"], last["atr"], params)
+            target = reversion_take_profit_price(held["avg_price"], params)
+            hit_stop = last["Low"] <= stop
+            hit_target = last["High"] >= target
+            reverted = bool(last["reversion_exit"])
+            signal_exit = hit_stop or hit_target or reverted
+            if signal_exit or kr_near_close:
+                reason = "손절" if hit_stop else ("익절" if hit_target else ("이평선회귀" if reverted else "장마감강제청산"))
+                exit_price = target if hit_target and not hit_stop else last["Close"]
+                print(f"[모의매도] {symbol} {held['shares']}주 @ {exit_price:,.0f} ({chg_str}) ({reason})")
+                db.add_trade(code, symbol, "sell", held["shares"], float(exit_price), note=note)
+                del holdings[code]
+                open_count -= 1
+            continue
+
+        if kr_near_close:
+            print(f"[건너뜀] {symbol} {last['Close']:,.0f}원 ({chg_str}) - 마감임박, 신규 진입 안 함")
+            continue
+        if not bool(last["reversion_entry"]):
+            print(f"[관찰] {symbol} {last['Close']:,.0f}원 ({chg_str}) - 이격도 {last['deviation_pct']:+.1f}%, 진입조건 아님")
+            continue
+        if open_count >= max_positions:
+            print(f"[건너뜀] {symbol} {last['Close']:,.0f}원 ({chg_str}) - 이격 신호지만 동시보유 한도({max_positions}종목) 도달")
+            continue
+
+        shares = reversion_position_size(equity, last["Close"], last["atr"], params)
+        if shares > 0:
+            print(f"[모의매수] {symbol} {shares}주 @ {last['Close']:,.0f}원 ({chg_str}) (이격도 {last['deviation_pct']:+.1f}%)")
+            db.add_trade(code, symbol, "buy", shares, float(last["Close"]), note=note)
+            holdings[code] = {"code": code, "name": symbol, "shares": shares, "avg_price": float(last["Close"])}
+            open_count += 1
+        else:
+            print(f"[건너뜀] {symbol} {last['Close']:,.0f}원 ({chg_str}) - 진입조건 충족했지만 계산된 매수수량 0")
+
+
 def cmd_live_surge(symbols: list | None = None, symbols_us: list | None = None,
                     max_positions: int | None = None, capital: float | None = None):
     """급등주(전일 대비 등락률 + 거래량 급증 + 거래대금) 전략. 국내+해외 공통.
@@ -824,8 +900,9 @@ def main():
     )
     parser.add_argument(
         "--note",
-        default="auto:sim",
-        help="--dry-run에서 매매일지에 남길 메모(note) 값. 기본값 auto:sim.",
+        default=None,
+        help="--dry-run에서 매매일지에 남길 메모(note) 값. 안 주면 모드별 기본값(live: auto:sim, "
+             "reversion: auto_test:reversion)을 쓴다.",
     )
     parser.add_argument(
         "--capital",
@@ -845,7 +922,11 @@ def main():
         return
 
     if args.mode == "reversion":
-        cmd_live_reversion(max_positions=args.max_positions, capital=args.capital)
+        if args.dry_run:
+            cmd_live_reversion_dry_run(max_positions=args.max_positions, capital=args.capital,
+                                        note=args.note or "auto_test:reversion")
+        else:
+            cmd_live_reversion(max_positions=args.max_positions, capital=args.capital)
         return
 
     symbols = CONFIG.symbols
@@ -857,7 +938,7 @@ def main():
         print(f"[--all-overseas] 해외 큐레이션 종목 {len(all_overseas)}개 추가 스캔 (총 {len(symbols)}개)")
 
     if args.dry_run:
-        cmd_live_dry_run(symbols, max_positions=args.max_positions, capital=args.capital, note=args.note)
+        cmd_live_dry_run(symbols, max_positions=args.max_positions, capital=args.capital, note=args.note or "auto:sim")
     else:
         cmd_live(symbols, max_positions=args.max_positions, capital=args.capital)
 

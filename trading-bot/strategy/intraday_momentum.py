@@ -19,8 +19,8 @@ class IntradayParams:
     base_range_pct: float = 1.5  # 그 구간 고저폭이 이 이내여야 "다지고 있다"로 판단
     breakout_volume_mult: float = 2.0  # 바닥 구간 평균 거래량 대비 이 배수 이상 터져야 "매수세 유입"
     stall_minutes: int = 3  # 신고가 갱신 없이 이만큼(분) 지나면 "상승 모멘텀 정체"로 보고 청산
-    stop_loss_pct: float = 2.0  # 진입가 대비 이만큼 반대로 가면 안전장치로 강제 손절
-    take_profit_pct: float = 4.0  # 진입가 대비 이만큼 오르면 모멘텀 정체를 기다리지 않고 바로 익절
+    stop_loss_pct: float = 0.8  # 진입가 대비 이만큼 반대로 가면 안전장치로 강제 손절 (기존 2.0에서 타이트하게)
+    take_profit_pct: float = 3.0  # 진입가 대비 이만큼 오르면 모멘텀 정체를 기다리지 않고 바로 익절 (기존 4.0에서 조정)
     risk_per_trade: float = 0.01  # 계좌 자산 대비 1건당 허용 손실 비율
     max_position_weight: float = 0.1  # 종목당 최대 비중
 
